@@ -15,7 +15,7 @@ struct Sidebar: View {
     var body: some View {
         VStack(alignment: .leading, spacing: 0) {
             HStack {
-                Image(systemName: "map.circle.fill").resizable().frame(width: 44, height: 44).foregroundColor(Brand.teal)
+                Image("Logo").resizable().scaledToFit().frame(width: 44, height: 44)
                 VStack(alignment: .leading) {
                     Text("MyWay").font(.title2).bold()
                     Text("Group travel companion").font(.caption).foregroundColor(.secondary)
@@ -69,7 +69,8 @@ struct Sidebar: View {
         .padding(16)
         .frame(width: 288)
         .frame(maxHeight: .infinity)
-        .background(Brand.surface(state.darkMode))
+        // Background fills to the screen edges (under the notch); content above keeps the safe-area inset.
+        .background(Brand.surface(state.darkMode).ignoresSafeArea())
     }
 
     private func section(_ t: String) -> some View {

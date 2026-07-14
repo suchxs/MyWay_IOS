@@ -12,22 +12,23 @@ struct ProfileView: View {
     @State private var last = ""
     @State private var tag = ""
     @State private var photoItem: PhotosPickerItem?
+    @State private var bannerItem: PhotosPickerItem?
+    @State private var showPhotoPicker = false
+    @State private var showBannerPicker = false
+    @State private var banner = ""
     @State private var toast: String?
     @State private var loaded = false
 
     var body: some View {
         Form {
             Section {
+                ProfileHeader(banner: banner, photo: profile.photo, tag: tag.isEmpty ? "?" : tag)
+                    .listRowInsets(EdgeInsets())
                 HStack {
+                    Button { showPhotoPicker = true } label: { Label("Change photo", systemImage: "camera") }
                     Spacer()
-                    PhotosPicker(selection: $photoItem, matching: .images) {
-                        AvatarCircle(photoBase64: profile.photo, tag: tag.isEmpty ? "?" : tag, size: 96)
-                            .overlay(alignment: .bottomTrailing) {
-                                Image(systemName: "camera.circle.fill").foregroundColor(Brand.teal).background(Circle().fill(.background))
-                            }
-                    }
-                    Spacer()
-                }
+                    Button { showBannerPicker = true } label: { Label("Change banner", systemImage: "photo") }
+                }.font(.subheadline).buttonStyle(.borderless)
             }
             Section("Name") {
                 TextField("First name", text: $first)
@@ -48,6 +49,8 @@ struct ProfileView: View {
             }
         }
         .navigationTitle("Profile")
+        .photosPicker(isPresented: $showPhotoPicker, selection: $photoItem, matching: .images)
+        .photosPicker(isPresented: $showBannerPicker, selection: $bannerItem, matching: .images)
         .overlay(alignment: .bottom) { if let toast { ToastView(toast) } }
         .onChange(of: photoItem) { item in
             Task {
@@ -58,12 +61,21 @@ struct ProfileView: View {
                 profile.photo = b64
             }
         }
+        .onChange(of: bannerItem) { item in
+            Task {
+                guard let data = try? await item?.loadTransferable(type: Data.self), let img = UIImage(data: data) else { return }
+                let b64 = Img.encode(img, maxDimension: 1024, quality: 0.6)   // wider than an avatar
+                Profiles.updateBanner(uid, base64: b64) { _ in }
+                banner = b64
+            }
+        }
         .onAppear {
             guard !loaded else { return }; loaded = true
             Profiles.fetchProfile(uid) { p in
                 guard let p else { return }
                 profile = p; first = p.firstName; last = p.lastName; tag = p.tag
             }
+            Profiles.fetchBanner(uid) { banner = $0 }
         }
     }
 

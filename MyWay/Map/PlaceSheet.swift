@@ -1,5 +1,6 @@
 // PlaceSheets.kt (marker detail) → SwiftUI. Rename, note, assign one collection, share to a group, delete.
 import SwiftUI
+import CoreLocation
 
 struct PlaceSheet: View {
     @EnvironmentObject var state: AppState
@@ -7,6 +8,8 @@ struct PlaceSheet: View {
     let place: SavedPlace
     let myUid: String
     let myTag: String
+    var onDirections: (CLLocationCoordinate2D, String) -> Void = { _, _ in }
+    var onViewLandmark: (SavedPlace) -> Void = { _ in }
 
     @State private var name = ""
     @State private var note = ""
@@ -28,6 +31,12 @@ struct PlaceSheet: View {
                     }
                 }
                 Section {
+                    Button { onDirections(place.coordinate, name.isEmpty ? "Saved pin" : name); dismiss() } label: {
+                        Label("Directions", systemImage: "arrow.triangle.turn.up.right.diamond.fill")
+                    }
+                    if place.isLandmark {
+                        Button { onViewLandmark(place); dismiss() } label: { Label("View landmark details", systemImage: "building.2") }
+                    }
                     Button { showShare = true } label: { Label("Share to a group", systemImage: "square.and.arrow.up") }
                     Button(role: .destructive) {
                         state.removeLocation(place); dismiss()

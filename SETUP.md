@@ -47,6 +47,15 @@ work on iOS. Create a sibling key in the **same Google Cloud project**:
    In Xcode → target → Info, add a row: `GMSApiKey` = *your key*. Keep it out of git (use an xcconfig or
    Info.plist that's gitignored if you prefer).
 
+## 3b. Enable the extra APIs (directions + landmark screen)
+In the **same Cloud project**, APIs & Services → Library → **Enable**:
+- **Places SDK for iOS** — the landmark detail screen (tap a POI on the map). Add it to your iOS key's
+  API restrictions too. Uses the same `GMS_API_KEY`.
+- **Routes API** — turn-by-turn directions. ⚠️ Routes is a **REST web service**, so it can't use a key
+  that has an *iOS-app* application restriction. Make a **second key** with application restriction
+  **None** (or IP) + API restriction **Routes API**, and put it in `Secrets.xcconfig` as `ROUTES_API_KEY`.
+  (If your `GMS_API_KEY` has no app restriction you may reuse it — but the restricted one is recommended.)
+
 ## 4. Push notifications (FCM)
 1. Apple Developer → create an **APNs Auth Key** (.p8).
 2. Firebase Console → Project settings → **Cloud Messaging** → **APNs Authentication Key** → upload it.
@@ -84,13 +93,26 @@ exists" rule — writing `trip_participants/{uid}` and `live_shares/{uid}` with 
 heartbeat. **Background location needs a real device or a simulator with a simulated location** (Xcode →
 Debug → Simulate Location), and iOS shows a permission prompt for "Always" access on first trip.
 
-**Still deferred** (not in the current scope):
-- **Turn-by-turn directions / navigation** — Routes API client + polyline + voice (`Directions.kt`,
-  `DirectionsUi.kt`). Trip Mode shows the destination as a marker but not a routed line yet.
-- **Private 1-on-1 DMs** (`PrivateChatActivity`) — Messages currently routes to Groups.
-- **Google Places autocomplete search** — the search bar is a placeholder; drop in `GMSAutocompleteViewController`.
+**Directions / navigation** (`Directions.swift`, `NavModel.swift`, `RouteCard.swift`): Routes API client
+(polyline + alternatives + steps), on-map route line, mode picker, ETA, live turn-by-turn with
+`AVSpeechSynthesizer` voice and off-route reroute. Started from a saved pin or a landmark → "Directions".
+
+**1-on-1 DMs** (`PrivateMessages.swift`, `MessagesView.swift`): the drawer's Messages is a DM inbox;
+start a chat from there or by swiping a friend → Message. Text + image, same wire format as Android.
+
+**Profile pictures + banners** (`ProfileHeader.swift`, `ProfileView`): avatar and Discord-style banner
+upload (`user_banners/{uid}`), shown on the profile and the reusable `ProfileCardSheet`.
+
+**Trip Plan** (`PlanView.swift`): create/pause a shared objective queue, mark Next/Done, add objectives
+at your location or from a trip pin — steers the group `tripDest`. Opened from the trip roster.
+
+**Landmark screen** (`LandmarkSheet.swift`): tap a Google POI → Places SDK details (photo, rating,
+address, hours, phone, website) with Directions + Save.
+
+**Still deferred** (not requested yet):
+- **Google Places autocomplete search** — the top search bar is still a placeholder; drop in `GMSAutocompleteViewController`.
 - **In-app heads-up notifications** (`NotificationHub`) — foreground FCM handling is stubbed in `AppDelegate`.
-- **Collection-offer + full Plan UI** — the service methods exist (`Trip.addPlanItem` etc.); the editor UI is minimal.
+- **Collection-offer sharing on a trip** (`Trip.shareCollection`) — service exists in Android; not yet on iOS.
 
 ## Account-linking note
 Android's login links a colliding provider (e.g. sign in with Google when the email already has a

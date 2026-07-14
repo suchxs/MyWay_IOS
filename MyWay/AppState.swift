@@ -25,6 +25,15 @@ final class AppState: ObservableObject {
         get { UserDefaults.standard.double(forKey: "pin_hue") }
         set { UserDefaults.standard.set(newValue, forKey: "pin_hue") }
     }
+    // Marker-appearance settings (App.kt getPinIcon/getPencilIcon).
+    var pinIcon: String {
+        get { UserDefaults.standard.string(forKey: "pin_icon") ?? "📝" }
+        set { UserDefaults.standard.set(newValue, forKey: "pin_icon") }
+    }
+    var pencilIcon: String {
+        get { UserDefaults.standard.string(forKey: "pencil_icon") ?? "✏️" }
+        set { UserDefaults.standard.set(newValue, forKey: "pencil_icon") }
+    }
     func userTag(_ uid: String) -> String { UserDefaults.standard.string(forKey: "usertag_\(uid)") ?? "" }
     func setUserTag(_ uid: String, _ tag: String) { UserDefaults.standard.set(tag, forKey: "usertag_\(uid)") }
     func userPhoto(_ uid: String) -> String { UserDefaults.standard.string(forKey: "userphoto_\(uid)") ?? "" }

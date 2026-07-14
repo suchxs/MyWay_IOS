@@ -6,9 +6,11 @@ struct TripRosterView: View {
     @Environment(\.dismiss) private var dismiss
     @ObservedObject var trip: TripManager
     let myUid: String
+    var myTag: String = ""
     var onFocusMember: (CLLocationCoordinate2D) -> Void
 
     @State private var showDropPin = false
+    @State private var showPlan = false
     @State private var pinName = ""
     @State private var pinNote = ""
 
@@ -38,6 +40,7 @@ struct TripRosterView: View {
                     }
                 }
                 Section {
+                    Button { showPlan = true } label: { Label("Trip plan", systemImage: "list.bullet.clipboard") }
                     Button { showDropPin = true } label: { Label("Drop a trip pin here", systemImage: "mappin.and.ellipse") }
                     Button(role: .destructive) { trip.leaveTrip(); dismiss() } label: { Label("Leave trip", systemImage: "rectangle.portrait.and.arrow.right") }
                     Button(role: .destructive) { trip.endTrip(); dismiss() } label: { Label("End trip for everyone", systemImage: "xmark.octagon") }
@@ -46,6 +49,11 @@ struct TripRosterView: View {
             .navigationTitle("Live trip")
             .navigationBarTitleDisplayMode(.inline)
             .toolbar { ToolbarItem(placement: .cancellationAction) { Button("Done") { dismiss() } } }
+            .sheet(isPresented: $showPlan) {
+                if let gid = trip.currentGid {
+                    PlanView(gid: gid, actorUid: myUid, actorTag: myTag, tripPins: trip.pins)
+                }
+            }
             .alert("Drop a trip pin", isPresented: $showDropPin) {
                 TextField("Name", text: $pinName)
                 TextField("Note", text: $pinNote)

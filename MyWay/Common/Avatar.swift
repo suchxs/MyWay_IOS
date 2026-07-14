@@ -11,7 +11,10 @@ enum Img {
     }
 
     static func decode(_ base64: String) -> UIImage? {
-        guard !base64.isEmpty, let data = Data(base64Encoded: base64) else { return nil }
+        // Android encodes with Base64.DEFAULT, which inserts newlines every 76 chars. iOS rejects those
+        // unless we ignore unknown characters — without this, Android-uploaded images never decode.
+        guard !base64.isEmpty,
+              let data = Data(base64Encoded: base64, options: .ignoreUnknownCharacters) else { return nil }
         return UIImage(data: data)
     }
 

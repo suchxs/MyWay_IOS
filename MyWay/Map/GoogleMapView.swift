@@ -11,10 +11,13 @@ struct GoogleMapView: UIViewRepresentable {
     var members: [TripMember] = []
     var tripPins: [TripPin] = []
     var dest: TripDest? = nil
+    var routePoints: [CLLocationCoordinate2D] = []
     var myUid: String = ""
     @Binding var camera: GMSCameraPosition?
     var onTapMarker: (SavedPlace) -> Void
     var onLongPress: (CLLocationCoordinate2D) -> Void
+    var onTapPOI: ((String, String, CLLocationCoordinate2D) -> Void)? = nil
+    var onTap: ((CLLocationCoordinate2D) -> Void)? = nil
 
     func makeCoordinator() -> Coordinator { Coordinator(self) }
 
@@ -29,16 +32,33 @@ struct GoogleMapView: UIViewRepresentable {
 
     func updateUIView(_ view: GMSMapView, context: Context) {
         applyStyle(view)
-        if let camera { view.animate(to: camera) }
+        // Animate only when the target actually changed, so re-renders don't fight the user panning.
+        if let camera {
+            let key = "\(camera.target.latitude),\(camera.target.longitude),\(camera.zoom)"
+            if context.coordinator.lastCameraKey != key {
+                context.coordinator.lastCameraKey = key
+                view.animate(to: camera)
+            }
+        }
         // Rebuild markers only when something changed (cheap for a personal map + a handful of trip pins).
         let placeSig = places.map(\.key).joined()
         let memberSig = members.map { "\($0.uid)\($0.lat ?? 0)\($0.lng ?? 0)" }.joined()
         let pinSig = tripPins.map(\.id).joined()
         let destSig = dest.map { "\($0.lat)\($0.lng)" } ?? ""
-        let signature = "\(placeSig)|\(pinHue)|\(memberSig)|\(pinSig)|\(destSig)"
+        let routeSig = "\(routePoints.count)\(routePoints.first?.latitude ?? 0)"
+        let signature = "\(placeSig)|\(pinHue)|\(memberSig)|\(pinSig)|\(destSig)|\(routeSig)"
         guard context.coordinator.lastSignature != signature else { return }
         context.coordinator.lastSignature = signature
         view.clear()
+
+        if routePoints.count > 1 {
+            let path = GMSMutablePath()
+            routePoints.forEach { path.add($0) }
+            let line = GMSPolyline(path: path)
+            line.strokeWidth = 6
+            line.strokeColor = UIColor(red: 0, green: 0.65, blue: 0.49, alpha: 1)
+            line.map = view
+        }
 
         for place in places {
             let marker = GMSMarker(position: place.coordinate)
@@ -78,6 +98,7 @@ struct GoogleMapView: UIViewRepresentable {
     final class Coordinator: NSObject, GMSMapViewDelegate {
         let parent: GoogleMapView
         var lastSignature = ""
+        var lastCameraKey = ""
         init(_ parent: GoogleMapView) { self.parent = parent }
 
         func mapView(_ mapView: GMSMapView, didTap marker: GMSMarker) -> Bool {
@@ -90,6 +111,15 @@ struct GoogleMapView: UIViewRepresentable {
 
         func mapView(_ mapView: GMSMapView, didLongPressAt coordinate: CLLocationCoordinate2D) {
             parent.onLongPress(coordinate)
+        }
+
+        func mapView(_ mapView: GMSMapView, didTapAt coordinate: CLLocationCoordinate2D) {
+            parent.onTap?(coordinate)
+        }
+
+        // Tapping a Google POI (landmark) → open the landmark details screen.
+        func mapView(_ mapView: GMSMapView, didTapPOIWithPlaceID placeID: String, name: String, location: CLLocationCoordinate2D) {
+            parent.onTapPOI?(placeID, name, location)
         }
     }
 }

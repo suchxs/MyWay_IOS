@@ -5,9 +5,12 @@ import SwiftUI
 import GoogleMaps
 import FirebaseAuth
 
+struct LandmarkTarget: Identifiable { let id: String; let name: String; let coord: CLLocationCoordinate2D }
+
 struct MapHomeView: View {
     @EnvironmentObject var state: AppState
     @StateObject private var loc = LocationManager()
+    @StateObject private var navModel = NavModel()
     @ObservedObject private var trip = TripManager.shared
 
     @State private var drawerOpen = false
@@ -19,6 +22,9 @@ struct MapHomeView: View {
     @State private var pendingDrop: CLLocationCoordinate2D?
     @State private var nav: SidebarDestination?
     @State private var showRoster = false
+    @State private var landmark: LandmarkTarget?
+    @State private var showSearch = false
+    @State private var pinMode = false
 
     private var uid: String { Auth.auth().currentUser?.uid ?? "" }
     private var myTag: String { state.userTag(uid) }
@@ -32,15 +38,22 @@ struct MapHomeView: View {
                 members: trip.currentGid != nil ? trip.members : [],
                 tripPins: trip.currentGid != nil ? trip.pins : [],
                 dest: trip.currentGid != nil ? trip.dest : nil,
+                routePoints: navModel.points,
                 myUid: uid,
                 camera: $camera,
-                onTapMarker: { selected = $0 },
-                onLongPress: { pendingDrop = $0 }
+                onTapMarker: { p in selected = p; center(on: p.coordinate) },
+                onLongPress: { pendingDrop = $0 },
+                onTapPOI: { id, name, coord in
+                    if pinMode { return }   // in pin mode, POI taps also just drop a pin (handled by onTap)
+                    landmark = LandmarkTarget(id: id, name: name, coord: coord); center(on: coord)
+                },
+                onTap: { c in if pinMode { state.saveLocation(c); pinMode = false } }
             )
             .ignoresSafeArea()
 
             topBar
-            bottomCard
+            if navModel.destination != nil { RouteCard(nav: navModel, origin: { loc.location?.coordinate }) }
+            else { bottomCard }
 
             if drawerOpen { drawerOverlay }
         }
@@ -51,12 +64,27 @@ struct MapHomeView: View {
             }
         }
         .onReceive(loc.$location.compactMap { $0 }) { l in
+            navModel.onLocation(l)
             guard !didCenter else { return }
             didCenter = true
             camera = GMSCameraPosition(latitude: l.coordinate.latitude, longitude: l.coordinate.longitude, zoom: 15)
         }
         .sheet(item: $selected) { place in
-            PlaceSheet(place: place, myUid: uid, myTag: myTag).environmentObject(state)
+            PlaceSheet(place: place, myUid: uid, myTag: myTag,
+                       onDirections: { c, name in navModel.plan(to: c, name: name, from: loc.location?.coordinate) },
+                       onViewLandmark: { p in landmark = LandmarkTarget(id: p.placeId, name: p.name, coord: p.coordinate) })
+                .environmentObject(state)
+        }
+        .sheet(item: $landmark) { t in
+            LandmarkSheet(placeID: t.id, fallbackName: t.name, coordinate: t.coord, myUid: uid, myTag: myTag,
+                          onDirections: { c, name in navModel.plan(to: c, name: name, from: loc.location?.coordinate) })
+                .environmentObject(state)
+        }
+        .sheet(isPresented: $showSearch) {
+            PlaceSearchView { id, name, coord in
+                center(on: coord)
+                if !id.isEmpty { landmark = LandmarkTarget(id: id, name: name, coord: coord) }
+            }
         }
         .alert("Drop a pin here?", isPresented: .constant(pendingDrop != nil)) {
             Button("Save") { if let c = pendingDrop { state.saveLocation(c) }; pendingDrop = nil }
@@ -66,7 +94,7 @@ struct MapHomeView: View {
             NavigationStack { destinationView(destination) }
         }
         .sheet(isPresented: $showRoster) {
-            TripRosterView(trip: trip, myUid: uid) { coord in
+            TripRosterView(trip: trip, myUid: uid, myTag: myTag) { coord in
                 camera = GMSCameraPosition(latitude: coord.latitude, longitude: coord.longitude, zoom: 16)
             }
         }
@@ -77,18 +105,19 @@ struct MapHomeView: View {
         VStack {
             HStack(spacing: 10) {
                 Button { withAnimation(.spring) { drawerOpen = true } } label: {
-                    Image(systemName: "line.3.horizontal").font(.title3).foregroundColor(.primary)
+                    Image("Logo").resizable().scaledToFit().padding(7)
                         .frame(width: 46, height: 46).background(Brand.surface(state.darkMode)).clipShape(Circle())
                         .shadow(radius: 4)
                 }
-                // ponytail: plain label for now; wire GMSAutocomplete here when Places SDK is added.
-                HStack {
-                    Image(systemName: "magnifyingglass").foregroundColor(.secondary)
-                    Text("Search places").foregroundColor(.secondary)
-                    Spacer()
+                Button { showSearch = true } label: {
+                    HStack {
+                        Image(systemName: "magnifyingglass").foregroundColor(.secondary)
+                        Text("Search places").foregroundColor(.secondary)
+                        Spacer()
+                    }
+                    .padding(.horizontal, 14).frame(height: 46)
+                    .background(Brand.surface(state.darkMode)).clipShape(Capsule()).shadow(radius: 4)
                 }
-                .padding(.horizontal, 14).frame(height: 46)
-                .background(Brand.surface(state.darkMode)).clipShape(Capsule()).shadow(radius: 4)
             }
             .padding(.horizontal, 16).padding(.top, 8)
 
@@ -127,10 +156,13 @@ struct MapHomeView: View {
                 }
                 Spacer()
             }
+            if pinMode {
+                Text("Tap the map to drop a pin")
+                    .font(.caption).bold().foregroundColor(Brand.tealDeep)
+                    .frame(maxWidth: .infinity).padding(.top, 8)
+            }
             HStack(spacing: 8) {
-                actionButton("mappin", "Pin") {
-                    if let c = loc.location?.coordinate { state.saveLocation(c) }
-                }
+                actionButton(pinMode ? "xmark" : "mappin", pinMode ? "Cancel" : "Pin") { pinMode.toggle() }
                 actionButton("square.and.arrow.up", "Share") { nav = .groups }   // share flow lives under Groups for now
             }.padding(.top, 12)
 
@@ -182,8 +214,11 @@ struct MapHomeView: View {
             )
             .environmentObject(state)
             .transition(.move(edge: .leading))
-            .ignoresSafeArea()
         }
+    }
+
+    private func center(on coord: CLLocationCoordinate2D) {
+        camera = GMSCameraPosition(latitude: coord.latitude, longitude: coord.longitude, zoom: 16)
     }
 
     @ViewBuilder
@@ -191,7 +226,7 @@ struct MapHomeView: View {
         switch d {
         case .friends:     FriendsView(myUid: uid, myTag: myTag)
         case .groups:      GroupsView(myUid: uid, myTag: myTag)
-        case .messages:    GroupsView(myUid: uid, myTag: myTag)   // DMs deferred; Groups holds chat for now
+        case .messages:    MessagesView(myUid: uid, myTag: myTag)
         case .collections: CollectionsView()
         case .waypoints:   CollectionsView()
         case .settings:    SettingsView()

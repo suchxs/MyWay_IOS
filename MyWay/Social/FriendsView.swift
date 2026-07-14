@@ -12,6 +12,7 @@ struct FriendsView: View {
     @State private var incoming: [FriendRequest] = []
     @State private var outgoing: [FriendRequest] = []
     @State private var toast: String?
+    @State private var dmWith: UserHit?
     @State private var regs: [ListenerRegistration] = []
 
     var body: some View {
@@ -68,11 +69,18 @@ struct FriendsView: View {
                         Button { Friends.setCloseFriend(myUid: myUid, otherUid: f.uid, isClose: !f.isClose) { _ in } } label: {
                             Label(f.isClose ? "Unstar" : "Close", systemImage: "star")
                         }.tint(.yellow)
+                        Button { dmWith = f } label: { Label("Message", systemImage: "bubble.left") }.tint(Brand.teal)
                     }
                 }
             }
         }
         .navigationTitle("Friends")
+        .sheet(item: $dmWith) { f in
+            NavigationStack {
+                PrivateChatView(chatId: PrivateMessages.pairId(myUid, f.uid), myUid: myUid, myTag: myTag,
+                                otherUid: f.uid, otherTag: f.tag)
+            }
+        }
         .overlay(alignment: .bottom) { if let toast { ToastView(toast) } }
         .onAppear {
             regs = [

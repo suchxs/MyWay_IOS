@@ -5,6 +5,7 @@ import FirebaseCore
 import FirebaseAuth
 import FirebaseMessaging
 import GoogleMaps
+import GooglePlaces
 import GoogleSignIn
 import UserNotifications
 
@@ -29,6 +30,7 @@ final class AppDelegate: NSObject, UIApplicationDelegate, MessagingDelegate, UNU
         FirebaseApp.configure()
         // Maps key comes from GoogleService-Info.plist's API_KEY is NOT used; Maps needs its own key.
         GMSServices.provideAPIKey(MapsConfig.apiKey)
+        GMSPlacesClient.provideAPIKey(MapsConfig.apiKey)   // landmark details / autocomplete
         Messaging.messaging().delegate = self
         UNUserNotificationCenter.current().delegate = self
 
@@ -64,4 +66,9 @@ final class AppDelegate: NSObject, UIApplicationDelegate, MessagingDelegate, UNU
 enum MapsConfig {
     // ponytail: read from Info.plist so the key isn't hard-coded in source.
     static let apiKey: String = (Bundle.main.object(forInfoDictionaryKey: "GMSApiKey") as? String) ?? ""
+    // Routes API (REST) needs a key without an iOS-app restriction; falls back to the Maps key.
+    static let routesKey: String = {
+        let k = (Bundle.main.object(forInfoDictionaryKey: "RoutesApiKey") as? String) ?? ""
+        return k.isEmpty ? apiKey : k
+    }()
 }
