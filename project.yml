@@ -1,0 +1,66 @@
+# XcodeGen spec — run `xcodegen generate` to produce MyWay.xcodeproj.
+# Chosen over a hand-written .pbxproj (fragile) and over CocoaPods (SPM covers every dep here).
+name: MyWay
+options:
+  bundleIdPrefix: com.usc
+  deploymentTarget:
+    iOS: "16.0"
+  createIntermediateGroups: true
+
+packages:
+  Firebase:
+    url: https://github.com/firebase/firebase-ios-sdk
+    from: 11.0.0
+  GoogleSignIn:
+    url: https://github.com/google/GoogleSignIn-iOS
+    from: 7.1.0
+  GoogleMaps:
+    url: https://github.com/googlemaps/ios-maps-sdk
+    from: 9.0.0
+
+targets:
+  MyWay:
+    type: application
+    platform: iOS
+    sources:
+      - MyWay
+    info:
+      path: MyWay/Info.plist
+      properties:
+        CFBundleDisplayName: MyWay
+        # Reads GMS_API_KEY from Secrets.xcconfig (gitignored) at build time. See SETUP.md step 3.
+        GMSApiKey: $(GMS_API_KEY)
+        UILaunchScreen: {}
+        NSLocationWhenInUseUsageDescription: MyWay uses your location to show you on the map and share it with your group.
+        NSLocationAlwaysAndWhenInUseUsageDescription: MyWay shares your live location with your group during a trip, even in the background.
+        NSCameraUsageDescription: Take a photo for your profile or to send in a chat.
+        NSPhotoLibraryUsageDescription: Pick a photo for your profile, group avatar, or a chat message.
+        UIBackgroundModes:
+          - location
+          - remote-notification
+        # Google Sign-In reversed client id — replace after adding GoogleService-Info.plist (see SETUP.md).
+        CFBundleURLTypes:
+          - CFBundleURLSchemes:
+              - com.googleusercontent.apps.953641079637-r8f9e6mo3bpe11kdsct01fscnp6q17pc
+    configFiles:
+      Debug: Secrets.xcconfig
+      Release: Secrets.xcconfig
+    settings:
+      base:
+        PRODUCT_BUNDLE_IDENTIFIER: com.usc.myway
+        MARKETING_VERSION: "1.0"
+        CURRENT_PROJECT_VERSION: "1"
+        SWIFT_VERSION: "5.0"
+        TARGETED_DEVICE_FAMILY: "1,2"
+        GENERATE_INFOPLIST_FILE: NO
+    dependencies:
+      - package: Firebase
+        product: FirebaseAuth
+      - package: Firebase
+        product: FirebaseFirestore
+      - package: Firebase
+        product: FirebaseMessaging
+      - package: GoogleSignIn
+        product: GoogleSignIn
+      - package: GoogleMaps
+        product: GoogleMaps
