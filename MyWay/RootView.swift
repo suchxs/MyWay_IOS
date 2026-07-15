@@ -21,6 +21,7 @@ final class Router: ObservableObject {
             TripManager.shared.bind(uid: user.uid, tag: state.userTag(user.uid), photo: state.userPhoto(user.uid))
             InAppNotifier.shared.start(user.uid)
             ProfileStore.shared.observe(user.uid)
+            ProfileStore.shared.observeBanner(user.uid)   // so the drawer header shows my banner
             // Skip a Firestore read when we've cached the @tag; else fall back to fetchTag.
             if !state.userTag(user.uid).isEmpty { self.route = .main; return }
             Profiles.fetchTag(user.uid) { tag in

@@ -284,7 +284,8 @@ struct MapHomeView: View {
         ZStack(alignment: .leading) {
             Color.black.opacity(0.35).ignoresSafeArea().onTapGesture { withAnimation { drawerOpen = false } }
             Sidebar(
-                userName: "", userTag: profiles.tag(uid).isEmpty ? myTag : profiles.tag(uid), userPhoto: profiles.photo(uid),
+                userName: profiles.name(uid), userTag: profiles.tag(uid).isEmpty ? myTag : profiles.tag(uid),
+                userPhoto: profiles.photo(uid), userBanner: profiles.banner(uid),
                 tracking: $tracking,
                 onNavigate: { dest in drawerOpen = false; nav = dest },
                 onLogout: { drawerOpen = false; AuthService.signOut() }

@@ -8,6 +8,7 @@ struct Sidebar: View {
     let userName: String
     let userTag: String
     let userPhoto: String
+    var userBanner: String = ""
     @Binding var tracking: Bool
     let onNavigate: (SidebarDestination) -> Void
     let onLogout: () -> Void
@@ -24,8 +25,14 @@ struct Sidebar: View {
 
             Button { onNavigate(.profile) } label: {
                 VStack(spacing: 0) {
-                    LinearGradient(colors: [Brand.tealBright, Brand.tealDeep], startPoint: .leading, endPoint: .trailing)
-                        .frame(height: 56)
+                    Group {
+                        if let img = Img.decode(userBanner) {
+                            Image(uiImage: img).resizable().scaledToFill()
+                        } else {
+                            LinearGradient(colors: [Brand.tealBright, Brand.tealDeep], startPoint: .leading, endPoint: .trailing)
+                        }
+                    }
+                    .frame(height: 56).frame(maxWidth: .infinity).clipped()
                     HStack {
                         AvatarCircle(photoBase64: userPhoto, tag: userTag.isEmpty ? "?" : userTag, size: 44)
                         VStack(alignment: .leading) {
