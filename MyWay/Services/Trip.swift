@@ -245,10 +245,14 @@ enum Trip {
         }
     }
 
+    /// A manual group direction while a plan is active → insert at the front of the unfinished items (and resume).
     static func prependPlanItem(_ gid: String, name: String, lat: Double, lng: Double, actorUid: String, actorTag: String, onDone: @escaping (String?) -> Void) {
         edit(gid, actorUid: actorUid, actorTag: actorTag, onDone: onDone) { cur in
             guard let cur else { return nil }
-            cur.items.insert(PlanItem(id: newId(), name: name, lat: lat, lng: lng, finished: false), at: 0); return cur
+            let idx = cur.items.firstIndex { !$0.finished } ?? cur.items.count
+            cur.items.insert(PlanItem(id: newId(), name: name, lat: lat, lng: lng, finished: false), at: idx)
+            cur.paused = false
+            return cur
         }
     }
 
