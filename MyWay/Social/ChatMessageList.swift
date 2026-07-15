@@ -13,6 +13,7 @@ struct ChatMessageList: View {
     let tags: [String: String]
     var onOpenPin: (GroupMessage) -> Void = { _ in }
     var onOpenLive: (GroupMessage) -> Void = { _ in }
+    var onOpenCollection: (GroupMessage) -> Void = { _ in }
     var onDelete: (GroupMessage) -> Void = { _ in }
     var onCommitEdit: (GroupMessage, String) -> Void = { _, _ in }
     var onTapUser: (String, String) -> Void = { _, _ in }   // tap a sender's avatar → their profile card
@@ -44,7 +45,7 @@ struct ChatMessageList: View {
                                           tag: tags[m.from] ?? m.fromTag,
                                           showAvatar: next == nil || next!.from != m.from,
                                           onTap: { selectedId = selectedId == m.id ? nil : m.id },
-                                          onOpenPin: onOpenPin, onOpenLive: onOpenLive,
+                                          onOpenPin: onOpenPin, onOpenLive: onOpenLive, onOpenCollection: onOpenCollection,
                                           onEdit: { editDraft = m.text; editing = m },
                                           onDelete: { onDelete(m) },
                                           onTapUser: { onTapUser(m.from, tags[m.from] ?? m.fromTag) })
@@ -99,6 +100,7 @@ private struct MessageBubble: View {
     var onTap: () -> Void
     var onOpenPin: (GroupMessage) -> Void
     var onOpenLive: (GroupMessage) -> Void = { _ in }
+    var onOpenCollection: (GroupMessage) -> Void = { _ in }
     var onEdit: () -> Void = {}
     var onDelete: () -> Void = {}
     var onTapUser: () -> Void = {}
@@ -125,7 +127,8 @@ private struct MessageBubble: View {
     private var isPin: Bool { m.pinLat != nil && m.pinLng != nil }
     private var isLive: Bool { !m.liveFrom.isEmpty }
     private var isImage: Bool { !m.image.isEmpty }
-    private var isText: Bool { !isImage && !isPin && !isLive }   // only plain text is editable
+    private var isCollection: Bool { !m.collPins.isEmpty }
+    private var isText: Bool { !isImage && !isPin && !isLive && !isCollection }   // only plain text is editable
 
     @ViewBuilder private var bubble: some View {
         if m.unsent {
@@ -148,7 +151,7 @@ private struct MessageBubble: View {
             .padding(.horizontal, isImage ? 0 : 12).padding(.vertical, isImage ? 0 : 8)
             .background(isImage ? Color.clear : (mine ? Brand.teal : Color.gray.opacity(0.18)))
             .clipShape(RoundedRectangle(cornerRadius: 16))
-            .onTapGesture { if isLive { onOpenLive(m) } else if isPin { onOpenPin(m) } else if !isImage { onTap() } }
+            .onTapGesture { if isLive { onOpenLive(m) } else if isPin { onOpenPin(m) } else if isCollection { onOpenCollection(m) } else if !isImage { onTap() } }
             // Hold a message to edit (text only) or unsend it — Messenger-style, your own messages only.
             .contextMenu {
                 if mine {
@@ -167,6 +170,13 @@ private struct MessageBubble: View {
             Label(m.pinName.isEmpty ? "Shared location" : m.pinName, systemImage: "mappin.circle.fill").bold()
             if !m.pinNote.isEmpty { Text(m.pinNote).font(.caption) }
             Text("Tap to view on map").font(.caption2).bold().foregroundColor(mine ? .white.opacity(0.85) : Brand.tealDeep)
+        } else if isCollection {
+            HStack(spacing: 6) {
+                Text(m.collIcon.isEmpty ? "🗂️" : m.collIcon)
+                Text(m.collName.isEmpty ? "Collection" : m.collName).bold()
+            }
+            Text("\(m.collPins.count) place\(m.collPins.count == 1 ? "" : "s")").font(.caption)
+            Text("Tap to view & save").font(.caption2).bold().foregroundColor(mine ? .white.opacity(0.85) : Brand.tealDeep)
         } else if isImage {
             if let img = Img.decode(m.image) {
                 Image(uiImage: img).resizable().scaledToFit().frame(maxWidth: 240, maxHeight: 280)

@@ -57,7 +57,9 @@ enum PrivateMessages {
                                  pinName: d.get("pinName") as? String ?? "", pinNote: d.get("pinNote") as? String ?? "",
                                  pinPlaceId: d.get("pinPlaceId") as? String ?? "", system: d.get("system") as? Bool ?? false,
                                  liveFrom: d.get("liveFrom") as? String ?? "", edited: d.get("edited") as? Bool ?? false,
-                                 unsent: d.get("unsent") as? Bool ?? false, ts: d.get("ts") as? Int64 ?? 0)
+                                 unsent: d.get("unsent") as? Bool ?? false,
+                                 collName: d.get("collName") as? String ?? "", collIcon: d.get("collIcon") as? String ?? "",
+                                 collPins: parseSharedPins(d.get("collPins")), ts: d.get("ts") as? Int64 ?? 0)
                 })
             }
     }
@@ -79,6 +81,7 @@ enum PrivateMessages {
         ref.collection("messages").document(mid).updateData([
             "unsent": true, "text": "", "image": "", "liveFrom": "", "edited": false,
             "pinLat": FieldValue.delete(), "pinLng": FieldValue.delete(), "pinName": "", "pinNote": "", "pinPlaceId": "",
+            "collName": "", "collIcon": "", "collPins": FieldValue.delete(),
         ])
         if isLast { ref.updateData(["lastMsg": "Unsent a message"]) }
     }
@@ -94,6 +97,15 @@ enum PrivateMessages {
         guard !base64.isEmpty else { return }
         post(chatId, fromUid: fromUid, fromTag: fromTag, otherUid: otherUid, otherTag: otherTag,
              preview: "📷 Image", msg: ["from": fromUid, "fromTag": fromTag, "text": "", "image": base64])
+    }
+
+    static func shareCollection(_ chatId: String, fromUid: String, fromTag: String, otherUid: String, otherTag: String,
+                                name: String, icon: String, pins: [SharedPin]) {
+        guard !pins.isEmpty else { return }
+        post(chatId, fromUid: fromUid, fromTag: fromTag, otherUid: otherUid, otherTag: otherTag,
+             preview: "🗂️ " + (name.isEmpty ? "Collection" : name),
+             msg: ["from": fromUid, "fromTag": fromTag, "text": "",
+                   "collName": name, "collIcon": icon, "collPins": pins.map(\.dict)])
     }
 
     /// Announce a live-location share in the DM; the card reads live_shares/{fromUid} when tapped.

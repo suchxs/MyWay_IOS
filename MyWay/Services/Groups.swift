@@ -76,6 +76,8 @@ enum Groups {
                                  liveFrom: d.get("liveFrom") as? String ?? "",
                                  edited: d.get("edited") as? Bool ?? false,
                                  unsent: d.get("unsent") as? Bool ?? false,
+                                 collName: d.get("collName") as? String ?? "", collIcon: d.get("collIcon") as? String ?? "",
+                                 collPins: parseSharedPins(d.get("collPins")),
                                  ts: d.get("ts") as? Int64 ?? 0)
                 })
             }
@@ -102,6 +104,7 @@ enum Groups {
         gref.collection("messages").document(mid).updateData([
             "unsent": true, "text": "", "image": "", "liveFrom": "", "edited": false,
             "pinLat": FieldValue.delete(), "pinLng": FieldValue.delete(), "pinName": "", "pinNote": "", "pinPlaceId": "",
+            "collName": "", "collIcon": "", "collPins": FieldValue.delete(),
         ])
         if isLast { gref.updateData(["lastMsg": "Unsent a message"]) }
     }
@@ -120,6 +123,12 @@ enum Groups {
     static func sharePin(_ gid: String, fromUid: String, fromTag: String, lat: Double, lng: Double, name: String, note: String, placeId: String) {
         post(gid, ["from": fromUid, "fromTag": fromTag, "text": "",
                    "pinLat": lat, "pinLng": lng, "pinName": name, "pinNote": note, "pinPlaceId": placeId])
+    }
+
+    static func shareCollection(_ gid: String, fromUid: String, fromTag: String, name: String, icon: String, pins: [SharedPin]) {
+        guard !pins.isEmpty else { return }
+        post(gid, ["from": fromUid, "fromTag": fromTag, "text": "",
+                   "collName": name, "collIcon": icon, "collPins": pins.map(\.dict)])
     }
 
     static func postSystem(_ gid: String, text: String) {
@@ -148,12 +157,14 @@ enum Groups {
     static func previewOf(_ f: [String: Any]) -> String {
         if let img = f["image"] as? String, !img.isEmpty { return "📷 Photo" }
         if let live = f["liveFrom"] as? String, !live.isEmpty { return "🔴 Live location" }
+        if let coll = f["collName"] as? String, !((f["collPins"] as? [Any])?.isEmpty ?? true) { return "🗂️ " + (coll.isEmpty ? "Collection" : coll) }
         if f["pinLat"] != nil { return "📍 " + ((f["pinName"] as? String).flatMap { $0.isEmpty ? nil : $0 } ?? "Location") }
         return f["text"] as? String ?? ""
     }
     static func previewOf(_ m: GroupMessage) -> String {
         if !m.image.isEmpty { return "📷 Photo" }
         if !m.liveFrom.isEmpty { return "🔴 Live location" }
+        if !m.collPins.isEmpty { return "🗂️ " + (m.collName.isEmpty ? "Collection" : m.collName) }
         if m.pinLat != nil { return "📍 " + (m.pinName.isEmpty ? "Location" : m.pinName) }
         return m.text
     }

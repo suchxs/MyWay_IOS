@@ -18,6 +18,7 @@ struct GroupChatView: View {
     @State private var pinViewer: PinTarget?
     @State private var cardTarget: ProfileCardTarget?
     @State private var dmTarget: ProfileCardTarget?
+    @State private var collOffer: CollectionOffer?
     @State private var reg: ListenerRegistration?
     @State private var groupReg: ListenerRegistration?
     @ObservedObject private var trip = TripManager.shared
@@ -33,6 +34,7 @@ struct GroupChatView: View {
                             reads: g.reads, tags: liveTags,
                             onOpenPin: { m in if let la = m.pinLat, let ln = m.pinLng { pinViewer = PinTarget(lat: la, lng: ln, name: m.pinName, note: m.pinNote) } },
                             onOpenLive: { m in liveViewer = LiveTarget(uid: m.liveFrom, name: "@\(liveTags[m.from] ?? m.fromTag)") },
+                            onOpenCollection: { m in collOffer = CollectionOffer(name: m.collName, icon: m.collIcon, pins: m.collPins) },
                             onDelete: { m in Groups.unsendMessage(group.id, mid: m.id, isLast: messages.last?.id == m.id) },
                             onCommitEdit: { m, t in
                                 Groups.editMessage(group.id, mid: m.id, text: t, newPreview: messages.last?.id == m.id ? t : nil)
@@ -42,6 +44,7 @@ struct GroupChatView: View {
         }
         .sheet(item: $liveViewer) { t in LiveViewerSheet(uid: t.uid, name: t.name) }
         .sheet(item: $pinViewer) { PinViewerSheet(pin: $0) }
+        .sheet(item: $collOffer) { CollectionViewerSheet(offer: $0) }
         .sheet(item: $cardTarget) { t in
             ProfileCard(uid: t.uid, fallbackTag: t.tag, onMessage: { dmTarget = t })
         }

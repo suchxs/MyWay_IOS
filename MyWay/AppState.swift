@@ -78,6 +78,19 @@ final class AppState: ObservableObject {
     func saveNote(_ key: String, _ note: String) { Places.setPlaceField(uid, key: key, field: "note", value: note) }
     func saveName(_ key: String, _ name: String) { Places.setPlaceField(uid, key: key, field: "name", value: name) }
 
+    /// Import a collection someone shared in chat: save each pin, then a new collection holding them.
+    func importSharedCollection(name: String, icon: String, pins: [SharedPin]) {
+        for p in pins {
+            let key = locationKey(p.lat, p.lng)
+            saveLocation(CLLocationCoordinate2D(latitude: p.lat, longitude: p.lng))
+            if !p.name.isEmpty { saveName(key, p.name) }
+            if !p.note.isEmpty { saveNote(key, p.note) }
+        }
+        saveCollection(PlaceCollection(name: name.isEmpty ? "Shared collection" : name,
+                                       icon: icon.isEmpty ? "🗂️" : icon,
+                                       keys: pins.map { locationKey($0.lat, $0.lng) }))
+    }
+
     // ── Collections ────────────────────────────────────────────────────────────────
     func saveCollection(_ c: PlaceCollection) { Places.saveCollection(uid, c) }
     func removeCollection(_ c: PlaceCollection) { Places.deleteCollection(uid, id: c.id) }

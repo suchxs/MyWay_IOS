@@ -85,7 +85,23 @@ struct GroupMessage: Identifiable, Equatable {
     var liveFrom: String = ""
     var edited: Bool = false
     var unsent: Bool = false
+    // Shared collection card: a whole collection's pins sent into a chat.
+    var collName: String = ""
+    var collIcon: String = ""
+    var collPins: [SharedPin] = []
     var ts: Int64 = 0
+}
+
+struct SharedPin: Equatable {
+    var lat, lng: Double; var name = ""; var note = ""
+    var dict: [String: Any] { ["lat": lat, "lng": lng, "name": name, "note": note] }
+}
+
+func parseSharedPins(_ raw: Any?) -> [SharedPin] {
+    guard let arr = raw as? [[String: Any]] else { return [] }
+    return arr.map { SharedPin(lat: ($0["lat"] as? NSNumber)?.doubleValue ?? 0,
+                               lng: ($0["lng"] as? NSNumber)?.doubleValue ?? 0,
+                               name: $0["name"] as? String ?? "", note: $0["note"] as? String ?? "") }
 }
 
 // Firestore doc id for a place — must match Android's App.locationKey exactly.

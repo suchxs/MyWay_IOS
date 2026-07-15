@@ -136,6 +136,7 @@ struct PrivateChatView: View {
     @State private var liveViewer: LiveTarget?
     @State private var pinViewer: PinTarget?
     @State private var cardTarget: ProfileCardTarget?
+    @State private var collOffer: CollectionOffer?
     @State private var reg: ListenerRegistration?
     @State private var chatReg: ListenerRegistration?
     @ObservedObject private var trip = TripManager.shared
@@ -157,6 +158,7 @@ struct PrivateChatView: View {
                             reads: chat?.reads ?? [:], tags: liveTags,
                             onOpenPin: { m in if let la = m.pinLat, let ln = m.pinLng { pinViewer = PinTarget(lat: la, lng: ln, name: m.pinName, note: m.pinNote) } },
                             onOpenLive: { m in liveViewer = LiveTarget(uid: m.liveFrom, name: "@\(m.fromTag)") },
+                            onOpenCollection: { m in collOffer = CollectionOffer(name: m.collName, icon: m.collIcon, pins: m.collPins) },
                             onDelete: { m in deleteMsg(m) },
                             onCommitEdit: { m, t in
                                 PrivateMessages.editMessage(chatId, mid: m.id, text: t,
@@ -196,6 +198,7 @@ struct PrivateChatView: View {
         .sheet(item: $liveViewer) { t in LiveViewerSheet(uid: t.uid, name: t.name) }
         .sheet(item: $pinViewer) { PinViewerSheet(pin: $0) }
         .sheet(item: $cardTarget) { t in ProfileCard(uid: t.uid, fallbackTag: t.tag) }
+        .sheet(item: $collOffer) { CollectionViewerSheet(offer: $0) }
         .onAppear {
             InAppNotifier.shared.activeChatKey = chatId
             ProfileStore.shared.observe([myUid, otherUid])
@@ -311,6 +314,39 @@ struct PinViewerSheet: View {
                 .navigationBarTitleDisplayMode(.inline)
                 .toolbar { ToolbarItem(placement: .cancellationAction) { Button("Close") { dismiss() } } }
                 .onAppear { camera = GMSCameraPosition(latitude: pin.lat, longitude: pin.lng, zoom: 16) }
+        }
+    }
+}
+
+struct CollectionOffer: Identifiable { let name, icon: String; let pins: [SharedPin]; var id: String { "\(name)-\(pins.count)" } }
+
+// Viewer for a collection shared in chat: shows every pin on the map + a one-tap save into your places.
+struct CollectionViewerSheet: View {
+    @Environment(\.dismiss) private var dismiss
+    let offer: CollectionOffer
+    @State private var camera: GMSCameraPosition?
+    @State private var saved = false
+
+    var body: some View {
+        NavigationStack {
+            VStack(spacing: 0) {
+                GoogleMapView(places: offer.pins.map { SavedPlace(key: locationKey($0.lat, $0.lng), lat: $0.lat, lng: $0.lng, name: $0.name, note: $0.note) },
+                              pinHue: 280, pinIcon: "📍", pencilGlyph: "📍",
+                              dark: AppState.shared.darkMode, showPersonal: true,
+                              camera: $camera, onTapMarker: { _ in }, onLongPress: { _ in })
+                    .ignoresSafeArea(edges: .bottom)
+                Button {
+                    AppState.shared.importSharedCollection(name: offer.name, icon: offer.icon, pins: offer.pins)
+                    saved = true
+                } label: {
+                    Label(saved ? "Saved to your collections" : "Save to my collections",
+                          systemImage: saved ? "checkmark.circle.fill" : "square.and.arrow.down").bold().frame(maxWidth: .infinity)
+                }.buttonStyle(.borderedProminent).tint(Brand.teal).disabled(saved).padding()
+            }
+            .navigationTitle("\(offer.icon.isEmpty ? "🗂️" : offer.icon) \(offer.name.isEmpty ? "Collection" : offer.name)")
+            .navigationBarTitleDisplayMode(.inline)
+            .toolbar { ToolbarItem(placement: .cancellationAction) { Button("Close") { dismiss() } } }
+            .onAppear { if let f = offer.pins.first { camera = GMSCameraPosition(latitude: f.lat, longitude: f.lng, zoom: 12) } }
         }
     }
 }

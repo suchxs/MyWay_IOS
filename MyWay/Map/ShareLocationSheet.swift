@@ -8,14 +8,18 @@ struct ShareLocationSheet: View {
     let myUid: String
     let myTag: String
     @ObservedObject private var trip = TripManager.shared
+    @ObservedObject private var profiles = ProfileStore.shared
 
     @State private var groups: [TravelGroup] = []
     @State private var selGroups: Set<String> = []
+    @State private var friends: [UserHit] = []
+    @State private var selFriends: Set<String> = []
+    @State private var friendsReg: ListenerRegistration?
     @State private var allFriends = false
     @State private var closeFriends = false
 
     private var active: Bool { trip.sharingLive }
-    private var canShare: Bool { !selGroups.isEmpty || allFriends || closeFriends }
+    private var canShare: Bool { !selGroups.isEmpty || !selFriends.isEmpty || allFriends || closeFriends }
 
     var body: some View {
         NavigationStack {
@@ -30,6 +34,17 @@ struct ShareLocationSheet: View {
                             toggleRow("Close friends only", systemImage: "star.fill", on: $closeFriends)
                         }
                         .background(cardBg)
+
+                        if !friends.isEmpty {
+                            Text("FRIENDS").font(.caption).bold().foregroundColor(.secondary).padding(.leading, 4)
+                            VStack(spacing: 0) {
+                                ForEach(Array(friends.enumerated()), id: \.element.id) { i, f in
+                                    friendRow(f)
+                                    if i < friends.count - 1 { Divider().padding(.leading, 58) }
+                                }
+                            }
+                            .background(cardBg)
+                        }
 
                         if !groups.isEmpty {
                             Text("GROUPS").font(.caption).bold().foregroundColor(.secondary).padding(.leading, 4)
@@ -62,7 +77,11 @@ struct ShareLocationSheet: View {
             .navigationTitle(active ? "Live location" : "Share location")
             .navigationBarTitleDisplayMode(.inline)
             .toolbar { ToolbarItem(placement: .cancellationAction) { Button("Cancel") { dismiss() } } }
-            .onAppear { Groups.fetchMyGroups(myUid) { groups = $0 } }
+            .onAppear {
+                Groups.fetchMyGroups(myUid) { groups = $0 }
+                friendsReg = Friends.listenFriends(myUid) { list in friends = list; ProfileStore.shared.observe(list.map { $0.uid }) }
+            }
+            .onDisappear { friendsReg?.remove() }
         }
     }
 
@@ -101,7 +120,21 @@ struct ShareLocationSheet: View {
         }.tint(.primary)
     }
 
+    private func friendRow(_ f: UserHit) -> some View {
+        let tag = profiles.tag(f.uid).isEmpty ? f.tag : profiles.tag(f.uid)
+        return Button { toggleFriend(f.uid) } label: {
+            HStack(spacing: 12) {
+                Image(systemName: selFriends.contains(f.uid) ? "checkmark.circle.fill" : "circle")
+                    .foregroundColor(selFriends.contains(f.uid) ? Brand.teal : .secondary).font(.title3)
+                AvatarCircle(photoBase64: profiles.photo(f.uid), tag: tag, size: 34)
+                Text("@\(tag)").foregroundColor(.primary)
+                Spacer()
+            }.padding(.horizontal, 12).padding(.vertical, 10)
+        }.tint(.primary)
+    }
+
     private func toggle(_ gid: String) { if selGroups.contains(gid) { selGroups.remove(gid) } else { selGroups.insert(gid) } }
+    private func toggleFriend(_ uid: String) { if selFriends.contains(uid) { selFriends.remove(uid) } else { selFriends.insert(uid) } }
 
     // Compute visibleTo (group members + friends) so recipients' maps discover the marker, then start
     // the share and post a live card into each selected group's chat.
@@ -109,12 +142,19 @@ struct ShareLocationSheet: View {
         guard let c = AppState.shared.lastLocation else { dismiss(); return }
         var visible = Set<String>()
         for gid in selGroups { if let g = groups.first(where: { $0.id == gid }) { visible.formUnion(g.members.filter { $0 != myUid }) } }
+        visible.formUnion(selFriends)   // individually-picked friends
 
         let finish = {
             LiveShare.start(uid: myUid, tag: myTag, photo: AppState.shared.userPhoto(myUid),
                             groups: Array(selGroups), allFriends: allFriends, closeFriends: closeFriends,
-                            uids: [], visibleTo: Array(visible), lat: c.latitude, lng: c.longitude) { _ in
+                            uids: Array(selFriends), visibleTo: Array(visible), lat: c.latitude, lng: c.longitude) { _ in
                 for gid in selGroups { Groups.postLiveShare(gid, fromUid: myUid, fromTag: myTag) }
+                // Post a live card into each picked friend's DM so they can tap to follow.
+                for f in friends where selFriends.contains(f.uid) {
+                    let tag = profiles.tag(f.uid).isEmpty ? f.tag : profiles.tag(f.uid)
+                    PrivateMessages.postLiveShare(PrivateMessages.pairId(myUid, f.uid), fromUid: myUid, fromTag: myTag,
+                                                  otherUid: f.uid, otherTag: tag)
+                }
             }
             dismiss()
         }

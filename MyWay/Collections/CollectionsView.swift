@@ -46,8 +46,10 @@ struct CollectionsView: View {
 private struct CollectionDetail: View {
     @EnvironmentObject var state: AppState
     let collection: PlaceCollection
+    @State private var showShare = false
 
     private var pins: [SavedPlace] { state.places.filter { collection.locationKeys.contains($0.key) } }
+    private var sharedPins: [SharedPin] { pins.map { SharedPin(lat: $0.lat, lng: $0.lng, name: $0.name, note: $0.note) } }
 
     var body: some View {
         List(pins) { p in
@@ -57,5 +59,15 @@ private struct CollectionDetail: View {
             }
         }
         .navigationTitle("\(collection.icon) \(collection.name)")
+        .toolbar {
+            ToolbarItem(placement: .primaryAction) {
+                Button { showShare = true } label: { Image(systemName: "square.and.arrow.up") }.disabled(pins.isEmpty)
+            }
+        }
+        .sheet(isPresented: $showShare) {
+            let myUid = AuthService.currentUid ?? ""
+            ShareCollectionSheet(name: collection.name, icon: collection.icon, pins: sharedPins,
+                                 myUid: myUid, myTag: state.userTag(myUid))
+        }
     }
 }
