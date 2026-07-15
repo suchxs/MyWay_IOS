@@ -13,8 +13,13 @@ struct ChatMessageList: View {
     let tags: [String: String]
     var onOpenPin: (GroupMessage) -> Void = { _ in }
     var onOpenLive: (GroupMessage) -> Void = { _ in }
+    var onDelete: (GroupMessage) -> Void = { _ in }
+    var onCommitEdit: (GroupMessage, String) -> Void = { _, _ in }
+    var onTapUser: (String, String) -> Void = { _, _ in }   // tap a sender's avatar → their profile card
 
     @State private var selectedId: String?
+    @State private var editing: GroupMessage?
+    @State private var editDraft = ""
 
     // Each other member's receipt hangs on the newest message they've seen.
     private var receipts: [String: [String]] {
@@ -39,7 +44,10 @@ struct ChatMessageList: View {
                                           tag: tags[m.from] ?? m.fromTag,
                                           showAvatar: next == nil || next!.from != m.from,
                                           onTap: { selectedId = selectedId == m.id ? nil : m.id },
-                                          onOpenPin: onOpenPin, onOpenLive: onOpenLive)
+                                          onOpenPin: onOpenPin, onOpenLive: onOpenLive,
+                                          onEdit: { editDraft = m.text; editing = m },
+                                          onDelete: { onDelete(m) },
+                                          onTapUser: { onTapUser(m.from, tags[m.from] ?? m.fromTag) })
                             if selectedId == m.id, !m.system { detailsRow(m) }
                             if let seenBy = receipts[m.id] { readReceipts(seenBy) }
                         }.id(m.id)
@@ -48,6 +56,11 @@ struct ChatMessageList: View {
             }
             .onChange(of: messages.count) { _ in if let l = messages.last { withAnimation { proxy.scrollTo(l.id, anchor: .bottom) } } }
             .onAppear { if let l = messages.last { proxy.scrollTo(l.id, anchor: .bottom) } }
+            .alert("Edit message", isPresented: Binding(get: { editing != nil }, set: { if !$0 { editing = nil } })) {
+                TextField("Message", text: $editDraft)
+                Button("Save") { if let m = editing { onCommitEdit(m, editDraft) }; editing = nil }
+                Button("Cancel", role: .cancel) { editing = nil }
+            }
         }
     }
 
@@ -86,6 +99,9 @@ private struct MessageBubble: View {
     var onTap: () -> Void
     var onOpenPin: (GroupMessage) -> Void
     var onOpenLive: (GroupMessage) -> Void = { _ in }
+    var onEdit: () -> Void = {}
+    var onDelete: () -> Void = {}
+    var onTapUser: () -> Void = {}
 
     var body: some View {
         if m.system {
@@ -94,8 +110,10 @@ private struct MessageBubble: View {
         } else {
             HStack(alignment: .bottom, spacing: 6) {
                 if !mine {
-                    if showAvatar { AvatarCircle(photoBase64: photo, tag: tag.isEmpty ? m.fromTag : tag, size: 28) }
-                    else { Color.clear.frame(width: 28, height: 28) }
+                    if showAvatar {
+                        AvatarCircle(photoBase64: photo, tag: tag.isEmpty ? m.fromTag : tag, size: 28)
+                            .onTapGesture { onTapUser() }
+                    } else { Color.clear.frame(width: 28, height: 28) }
                 }
                 if mine { Spacer(minLength: 40) }
                 bubble
@@ -107,19 +125,38 @@ private struct MessageBubble: View {
     private var isPin: Bool { m.pinLat != nil && m.pinLng != nil }
     private var isLive: Bool { !m.liveFrom.isEmpty }
     private var isImage: Bool { !m.image.isEmpty }
+    private var isText: Bool { !isImage && !isPin && !isLive }   // only plain text is editable
 
-    private var bubble: some View {
-        VStack(alignment: .leading, spacing: 4) {
-            if !mine { Text("@\(tag.isEmpty ? m.fromTag : tag)").font(.caption2).bold().foregroundColor(Brand.tealDeep)
-                .padding(.leading, isImage ? 4 : 0) }
-            content
+    @ViewBuilder private var bubble: some View {
+        if m.unsent {
+            // Tombstone — the message was unsent but stays in place (Messenger-style), muted + outlined.
+            HStack(spacing: 6) {
+                Image(systemName: "slash.circle").font(.caption)
+                Text(mine ? "You unsent a message" : "@\(tag.isEmpty ? m.fromTag : tag) unsent a message").italic()
+            }
+            .font(.subheadline).foregroundColor(.secondary)
+            .padding(.horizontal, 12).padding(.vertical, 8)
+            .overlay(RoundedRectangle(cornerRadius: 16).stroke(Color.gray.opacity(0.35), lineWidth: 1))
+        } else {
+            VStack(alignment: .leading, spacing: 4) {
+                if !mine { Text("@\(tag.isEmpty ? m.fromTag : tag)").font(.caption2).bold().foregroundColor(Brand.tealDeep)
+                    .padding(.leading, isImage ? 4 : 0).onTapGesture { onTapUser() } }
+                content
+            }
+            .foregroundColor(mine ? .white : .primary)
+            // Images get no coloured bubble (that teal/cyan box behind photos was the bug); text/cards do.
+            .padding(.horizontal, isImage ? 0 : 12).padding(.vertical, isImage ? 0 : 8)
+            .background(isImage ? Color.clear : (mine ? Brand.teal : Color.gray.opacity(0.18)))
+            .clipShape(RoundedRectangle(cornerRadius: 16))
+            .onTapGesture { if isLive { onOpenLive(m) } else if isPin { onOpenPin(m) } else if !isImage { onTap() } }
+            // Hold a message to edit (text only) or unsend it — Messenger-style, your own messages only.
+            .contextMenu {
+                if mine {
+                    if isText { Button { onEdit() } label: { Label("Edit", systemImage: "pencil") } }
+                    Button(role: .destructive) { onDelete() } label: { Label("Unsend", systemImage: "trash") }
+                }
+            }
         }
-        .foregroundColor(mine ? .white : .primary)
-        // Images get no coloured bubble (that teal/cyan box behind photos was the bug); text/cards do.
-        .padding(.horizontal, isImage ? 0 : 12).padding(.vertical, isImage ? 0 : 8)
-        .background(isImage ? Color.clear : (mine ? Brand.teal : Color.gray.opacity(0.18)))
-        .clipShape(RoundedRectangle(cornerRadius: 16))
-        .onTapGesture { if isLive { onOpenLive(m) } else if isPin { onOpenPin(m) } else if !isImage { onTap() } }
     }
 
     @ViewBuilder private var content: some View {
@@ -140,6 +177,10 @@ private struct MessageBubble: View {
             }
         } else {
             Text(m.text)
+            if m.edited {
+                Text("(edited)").font(.caption2).italic()
+                    .foregroundColor(mine ? .white.opacity(0.7) : .secondary)
+            }
         }
     }
 }

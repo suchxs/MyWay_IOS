@@ -15,6 +15,9 @@ struct GroupChatView: View {
     @State private var photoItem: PhotosPickerItem?
     @State private var showInfo = false
     @State private var liveViewer: LiveTarget?
+    @State private var pinViewer: PinTarget?
+    @State private var cardTarget: ProfileCardTarget?
+    @State private var dmTarget: ProfileCardTarget?
     @State private var reg: ListenerRegistration?
     @State private var groupReg: ListenerRegistration?
     @ObservedObject private var trip = TripManager.shared
@@ -28,15 +31,31 @@ struct GroupChatView: View {
             tripBar
             ChatMessageList(messages: messages, myUid: myUid, photos: profiles.photos,
                             reads: g.reads, tags: liveTags,
-                            onOpenLive: { m in liveViewer = LiveTarget(uid: m.liveFrom, name: "@\(liveTags[m.from] ?? m.fromTag)") })
+                            onOpenPin: { m in if let la = m.pinLat, let ln = m.pinLng { pinViewer = PinTarget(lat: la, lng: ln, name: m.pinName, note: m.pinNote) } },
+                            onOpenLive: { m in liveViewer = LiveTarget(uid: m.liveFrom, name: "@\(liveTags[m.from] ?? m.fromTag)") },
+                            onDelete: { m in Groups.unsendMessage(group.id, mid: m.id, isLast: messages.last?.id == m.id) },
+                            onCommitEdit: { m, t in
+                                Groups.editMessage(group.id, mid: m.id, text: t, newPreview: messages.last?.id == m.id ? t : nil)
+                            },
+                            onTapUser: { uid, tag in if uid != myUid { cardTarget = ProfileCardTarget(uid: uid, tag: tag) } })
             composer
         }
         .sheet(item: $liveViewer) { t in LiveViewerSheet(uid: t.uid, name: t.name) }
+        .sheet(item: $pinViewer) { PinViewerSheet(pin: $0) }
+        .sheet(item: $cardTarget) { t in
+            ProfileCard(uid: t.uid, fallbackTag: t.tag, onMessage: { dmTarget = t })
+        }
+        .sheet(item: $dmTarget) { t in
+            NavigationStack {
+                PrivateChatView(chatId: PrivateMessages.pairId(myUid, t.uid), myUid: myUid, myTag: myTag,
+                                otherUid: t.uid, otherTag: t.tag)
+            }
+        }
         .navigationTitle(g.name)
         .navigationBarTitleDisplayMode(.inline)
         .toolbar { ToolbarItem(placement: .primaryAction) { Button { showInfo = true } label: { Image(systemName: "info.circle") } } }
         .sheet(isPresented: $showInfo) {
-            GroupInfoSheet(group: g, myUid: myUid, myTag: myTag, messages: messages, photos: profiles.photos)
+            GroupInfoSheet(initialGroup: g, myUid: myUid, myTag: myTag, messages: messages, photos: profiles.photos)
         }
         .onAppear {
             InAppNotifier.shared.activeChatKey = group.id
@@ -99,17 +118,21 @@ struct GroupChatView: View {
 
 struct GroupInfoSheet: View {
     @Environment(\.dismiss) private var dismiss
-    let group: TravelGroup
+    let initialGroup: TravelGroup
     let myUid: String
     let myTag: String
     let messages: [GroupMessage]
     let photos: [String: String]
     @ObservedObject private var profiles = ProfileStore.shared
 
+    @State private var liveGroup: TravelGroup?
+    @State private var groupReg: ListenerRegistration?
     @State private var photoItem: PhotosPickerItem?
     @State private var showAdd = false
     @State private var confirmDelete = false
 
+    // Live group doc so role changes (promote/demote/kick) reflect in real time.
+    private var group: TravelGroup { liveGroup ?? initialGroup }
     private var iAmOwner: Bool { myUid == group.owner }
     private var iAmAdmin: Bool { group.isAdmin(myUid) }
     private var recentImages: [GroupMessage] { messages.filter { !$0.image.isEmpty }.suffix(12).reversed() }
@@ -162,7 +185,7 @@ struct GroupInfoSheet: View {
             .toolbar { ToolbarItem(placement: .cancellationAction) { Button("Done") { dismiss() } } }
             .sheet(isPresented: $showAdd) { AddMemberSheet(group: group, myUid: myUid) }
             .alert("Delete group?", isPresented: $confirmDelete) {
-                Button("Delete", role: .destructive) { Firestore.firestore().collection("groups").document(group.id).delete(); dismiss() }
+                Button("Delete", role: .destructive) { Groups.deleteGroup(group.id); dismiss() }
                 Button("Cancel", role: .cancel) {}
             }
             .onChange(of: photoItem) { item in
@@ -171,6 +194,12 @@ struct GroupInfoSheet: View {
                     Groups.updatePhoto(group.id, base64: Img.encode(img, maxDimension: 512, quality: 0.7)) { _ in }
                 }
             }
+            .onAppear {
+                groupReg = Groups.listenGroup(initialGroup.id) { g in
+                    if let g { liveGroup = g; ProfileStore.shared.observe(g.members) }
+                }
+            }
+            .onDisappear { groupReg?.remove() }
         }
     }
 
@@ -205,18 +234,19 @@ struct AddMemberSheet: View {
     let myUid: String
     @State private var friends: [UserHit] = []
     @State private var reg: ListenerRegistration?
+    @ObservedObject private var profiles = ProfileStore.shared
 
     var body: some View {
         NavigationStack {
             List(friends.filter { !group.members.contains($0.uid) }) { f in
                 Button { Groups.addMember(group.id, friend: f) { _ in }; dismiss() } label: {
-                    HStack { AvatarCircle(photoBase64: f.photo, tag: f.tag, size: 34); Text("@\(f.tag)").bold(); Spacer() }
+                    HStack { AvatarCircle(photoBase64: profiles.photo(f.uid), tag: f.tag, size: 34); Text("@\(f.tag)").bold(); Spacer() }
                 }
             }
             .navigationTitle("Add member")
             .navigationBarTitleDisplayMode(.inline)
             .toolbar { ToolbarItem(placement: .cancellationAction) { Button("Cancel") { dismiss() } } }
-            .onAppear { reg = Friends.listenFriends(myUid) { friends = $0 } }
+            .onAppear { reg = Friends.listenFriends(myUid) { list in friends = list; ProfileStore.shared.observe(list.map { $0.uid }) } }
             .onDisappear { reg?.remove() }
         }
     }

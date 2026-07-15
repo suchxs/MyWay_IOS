@@ -56,9 +56,31 @@ enum PrivateMessages {
                                  pinLat: d.get("pinLat") as? Double, pinLng: d.get("pinLng") as? Double,
                                  pinName: d.get("pinName") as? String ?? "", pinNote: d.get("pinNote") as? String ?? "",
                                  pinPlaceId: d.get("pinPlaceId") as? String ?? "", system: d.get("system") as? Bool ?? false,
-                                 liveFrom: d.get("liveFrom") as? String ?? "", ts: d.get("ts") as? Int64 ?? 0)
+                                 liveFrom: d.get("liveFrom") as? String ?? "", edited: d.get("edited") as? Bool ?? false,
+                                 unsent: d.get("unsent") as? Bool ?? false, ts: d.get("ts") as? Int64 ?? 0)
                 })
             }
+    }
+
+    /// Edit a text message (author only). `newPreview` non-nil ⇒ this was the newest message, so also
+    /// refresh the inbox preview on the parent chat doc.
+    static func editMessage(_ chatId: String, mid: String, text: String, newPreview: String?) {
+        let body = text.trimmingCharacters(in: .whitespaces)
+        guard !body.isEmpty else { return }
+        let ref = db.collection("private_chats").document(chatId)
+        ref.collection("messages").document(mid).updateData(["text": body, "edited": true])
+        if newPreview != nil { ref.updateData(["lastMsg": body]) }
+    }
+
+    /// Unsend a message (author only). Soft-delete: keeps the message as a tombstone with content cleared.
+    /// Updates the inbox preview when it was the newest message.
+    static func unsendMessage(_ chatId: String, mid: String, isLast: Bool) {
+        let ref = db.collection("private_chats").document(chatId)
+        ref.collection("messages").document(mid).updateData([
+            "unsent": true, "text": "", "image": "", "liveFrom": "", "edited": false,
+            "pinLat": FieldValue.delete(), "pinLng": FieldValue.delete(), "pinName": "", "pinNote": "", "pinPlaceId": "",
+        ])
+        if isLast { ref.updateData(["lastMsg": "Unsent a message"]) }
     }
 
     static func sendMessage(_ chatId: String, fromUid: String, fromTag: String, otherUid: String, otherTag: String, text: String) {

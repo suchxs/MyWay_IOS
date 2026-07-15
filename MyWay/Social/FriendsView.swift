@@ -14,6 +14,7 @@ struct FriendsView: View {
     @State private var toast: String?
     @State private var dmWith: UserHit?
     @State private var regs: [ListenerRegistration] = []
+    @ObservedObject private var profiles = ProfileStore.shared
 
     var body: some View {
         List {
@@ -47,6 +48,7 @@ struct FriendsView: View {
                 Section("Requests") {
                     ForEach(incoming) { req in
                         HStack {
+                            AvatarCircle(photoBase64: profiles.photo(req.fromUid), tag: req.fromTag, size: 36)
                             Text("@\(req.fromTag)").bold()
                             Spacer()
                             Button("Accept") { Friends.accept(req) { toast = $0 } }.tint(Brand.teal).buttonStyle(.bordered)
@@ -59,8 +61,8 @@ struct FriendsView: View {
             Section("Friends (\(friends.count))") {
                 ForEach(friends) { f in
                     HStack {
-                        AvatarCircle(photoBase64: f.photo, tag: f.tag, size: 36)
-                        Text("@\(f.tag)").bold()
+                        AvatarCircle(photoBase64: profiles.photo(f.uid), tag: profiles.tag(f.uid).isEmpty ? f.tag : profiles.tag(f.uid), size: 36)
+                        Text("@\(profiles.tag(f.uid).isEmpty ? f.tag : profiles.tag(f.uid))").bold()
                         if f.isClose { Image(systemName: "star.fill").foregroundColor(.yellow).font(.caption) }
                         Spacer()
                     }
@@ -84,8 +86,8 @@ struct FriendsView: View {
         .overlay(alignment: .bottom) { if let toast { ToastView(toast) } }
         .onAppear {
             regs = [
-                Friends.listenFriends(myUid) { friends = $0 },
-                Friends.listenIncoming(myUid) { incoming = $0 },
+                Friends.listenFriends(myUid) { list in friends = list; ProfileStore.shared.observe(list.map { $0.uid }) },
+                Friends.listenIncoming(myUid) { list in incoming = list; ProfileStore.shared.observe(list.map { $0.fromUid }) },
                 Friends.listenOutgoing(myUid) { outgoing = $0 },
             ]
         }

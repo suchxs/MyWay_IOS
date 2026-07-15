@@ -17,6 +17,7 @@ struct ProfileView: View {
     @State private var banner = ""
     @State private var toast: String?
     @State private var loaded = false
+    @State private var confirmDelete = false
 
     @State private var pickTarget: PickTarget = .photo
     @State private var showPicker = false
@@ -46,13 +47,20 @@ struct ProfileView: View {
 
             Section {
                 Button("Sign out") { AuthService.signOut(); dismiss() }
-                Button("Delete my data", role: .destructive) {
-                    Profiles.deleteMyData(uid, tagLower: Profiles.normalize(tag)) { toast = $0 ?? "Deleted" }
-                    AuthService.signOut(); dismiss()
-                }
+                Button("Delete my account", role: .destructive) { confirmDelete = true }
             }
         }
         .navigationTitle("Profile")
+        .alert("Delete your account?", isPresented: $confirmDelete) {
+            Button("Delete", role: .destructive) {
+                AuthService.deleteAccount(uid: uid, tagLower: Profiles.normalize(tag)) { err in
+                    if let err { toast = err } else { dismiss() }
+                }
+            }
+            Button("Cancel", role: .cancel) {}
+        } message: {
+            Text("This permanently removes your profile and sign-in account. This can't be undone.")
+        }
         .photosPicker(isPresented: $showPicker, selection: $pickedItem, matching: .images)
         .overlay(alignment: .bottom) { if let toast { ToastView(toast) } }
         .onChange(of: pickedItem) { item in
@@ -68,7 +76,7 @@ struct ProfileView: View {
                 } else {
                     let b64 = Img.encode(img, maxDimension: 1024, quality: 0.6)   // wider than an avatar
                     Profiles.updateBanner(uid, base64: b64) { _ in }
-                    banner = b64
+                    banner = b64; ProfileStore.shared.setLocal(uid: uid, banner: b64)
                 }
                 pickedItem = nil
             }

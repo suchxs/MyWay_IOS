@@ -1,44 +1,97 @@
-// MessagesActivity + PrivateChatActivity → SwiftUI. DM inbox + 1-on-1 chat with avatars, read receipts,
-// and an info sheet (the other person + recent images). Start a chat from the inbox or a friend.
+// Unified inbox (Messenger-style): group chats + 1-on-1 DMs in one list, newest first. The + button
+// starts either a DM (pick a friend) or a new group. Names/photos/previews are live via ProfileStore
+// (DMs) and the groups listener. Opening a row goes to the group or private chat.
 import SwiftUI
 import PhotosUI
 import FirebaseFirestore
 import GoogleMaps
 
+// One row in the unified inbox — a group or a DM, normalised so they render + sort together.
+struct Conversation: Identifiable {
+    enum Kind { case group(TravelGroup); case dm(chat: PrivateChat, otherUid: String, tag: String) }
+    let id: String
+    let kind: Kind
+    let title: String
+    let photo: String
+    let preview: String
+    let ts: Int64
+    let tripActive: Bool
+}
+
 struct MessagesView: View {
     let myUid: String
     let myTag: String
     @State private var chats: [PrivateChat] = []
-    @State private var showNew = false
-    @State private var reg: ListenerRegistration?
+    @State private var groups: [TravelGroup] = []
+    @State private var showNewMenu = false
+    @State private var showNewDM = false
+    @State private var showNewGroup = false
+    @State private var chatReg: ListenerRegistration?
+    @State private var groupReg: ListenerRegistration?
     @ObservedObject private var profiles = ProfileStore.shared
 
+    private var conversations: [Conversation] {
+        let dms = chats.map { c -> Conversation in
+            let other = c.otherUid(myUid)
+            let tag = profiles.tag(other).isEmpty ? c.otherTag(myUid) : profiles.tag(other)
+            return Conversation(id: "p:\(c.id)", kind: .dm(chat: c, otherUid: other, tag: tag),
+                                title: "@\(tag)", photo: profiles.photo(other),
+                                preview: c.lastMsg, ts: c.lastTs, tripActive: false)
+        }
+        let grps = groups.map { g in
+            Conversation(id: "g:\(g.id)", kind: .group(g), title: g.name, photo: g.photo,
+                         preview: g.lastMsg.isEmpty ? "\(g.members.count) members" : g.lastMsg,
+                         ts: g.lastTs, tripActive: g.tripActive)
+        }
+        return (dms + grps).sorted { $0.ts > $1.ts }
+    }
+
     var body: some View {
-        List(chats) { chat in
-            let other = chat.otherUid(myUid)
-            let tag = profiles.tag(other).isEmpty ? chat.otherTag(myUid) : profiles.tag(other)
-            NavigationLink {
-                PrivateChatView(chatId: chat.id, myUid: myUid, myTag: myTag, otherUid: other, otherTag: tag)
-            } label: {
-                HStack {
-                    AvatarCircle(photoBase64: profiles.photo(other), tag: tag, size: 44)
-                    VStack(alignment: .leading) {
-                        Text("@\(tag)").bold()
-                        Text(chat.lastMsg).font(.caption).foregroundColor(.secondary).lineLimit(1)
-                    }
-                }
-            }
+        List(conversations) { conv in
+            NavigationLink { destination(conv) } label: { row(conv) }
         }
         .navigationTitle("Messages")
-        .toolbar { ToolbarItem(placement: .primaryAction) { Button { showNew = true } label: { Image(systemName: "square.and.pencil") } } }
-        .sheet(isPresented: $showNew) { NewMessageSheet(myUid: myUid, myTag: myTag) }
+        .toolbar { ToolbarItem(placement: .primaryAction) { Button { showNewMenu = true } label: { Image(systemName: "square.and.pencil") } } }
+        .confirmationDialog("Start a conversation", isPresented: $showNewMenu, titleVisibility: .visible) {
+            Button("Message a friend") { showNewDM = true }
+            Button("Create a group") { showNewGroup = true }
+        }
+        .sheet(isPresented: $showNewDM) { NewMessageSheet(myUid: myUid, myTag: myTag) }
+        .sheet(isPresented: $showNewGroup) { CreateGroupSheet(myUid: myUid, myTag: myTag) }
         .onAppear {
-            reg = PrivateMessages.listenMyChats(myUid) { list in
-                chats = list
-                ProfileStore.shared.observe(list.map { $0.otherUid(myUid) })
+            chatReg = PrivateMessages.listenMyChats(myUid) { list in
+                chats = list; ProfileStore.shared.observe(list.map { $0.otherUid(myUid) })
+            }
+            groupReg = Groups.listenMyGroups(myUid) { list in
+                groups = list; list.forEach { ProfileStore.shared.observe($0.members) }
             }
         }
-        .onDisappear { reg?.remove() }
+        .onDisappear { chatReg?.remove(); groupReg?.remove() }
+    }
+
+    @ViewBuilder private func destination(_ conv: Conversation) -> some View {
+        switch conv.kind {
+        case .group(let g): GroupChatView(group: g, myUid: myUid, myTag: myTag)
+        case .dm(let c, let other, let tag): PrivateChatView(chatId: c.id, myUid: myUid, myTag: myTag, otherUid: other, otherTag: tag)
+        }
+    }
+
+    private func row(_ conv: Conversation) -> some View {
+        HStack(spacing: 12) {
+            AvatarCircle(photoBase64: conv.photo, tag: conv.title.replacingOccurrences(of: "@", with: ""), size: 46)
+            VStack(alignment: .leading, spacing: 2) {
+                HStack(spacing: 6) {
+                    if case .group = conv.kind { Image(systemName: "person.3.fill").font(.caption2).foregroundColor(.secondary) }
+                    Text(conv.title).bold().lineLimit(1)
+                    if conv.tripActive {
+                        Text("LIVE").font(.caption2).bold().foregroundColor(.white)
+                            .padding(.horizontal, 6).padding(.vertical, 2).background(Color.red).clipShape(Capsule())
+                    }
+                }
+                Text(conv.preview.isEmpty ? "No messages yet" : conv.preview)
+                    .font(.caption).foregroundColor(.secondary).lineLimit(1)
+            }
+        }
     }
 }
 
@@ -48,6 +101,7 @@ struct NewMessageSheet: View {
     let myTag: String
     @State private var friends: [UserHit] = []
     @State private var reg: ListenerRegistration?
+    @ObservedObject private var profiles = ProfileStore.shared
 
     var body: some View {
         NavigationStack {
@@ -55,13 +109,13 @@ struct NewMessageSheet: View {
                 NavigationLink {
                     PrivateChatView(chatId: PrivateMessages.pairId(myUid, f.uid), myUid: myUid, myTag: myTag, otherUid: f.uid, otherTag: f.tag)
                 } label: {
-                    HStack { AvatarCircle(photoBase64: f.photo, tag: f.tag, size: 36); Text("@\(f.tag)").bold(); Spacer() }
+                    HStack { AvatarCircle(photoBase64: profiles.photo(f.uid), tag: f.tag, size: 36); Text("@\(f.tag)").bold(); Spacer() }
                 }
             }
             .navigationTitle("New message")
             .navigationBarTitleDisplayMode(.inline)
             .toolbar { ToolbarItem(placement: .cancellationAction) { Button("Cancel") { dismiss() } } }
-            .onAppear { reg = Friends.listenFriends(myUid) { friends = $0 } }
+            .onAppear { reg = Friends.listenFriends(myUid) { list in friends = list; ProfileStore.shared.observe(list.map { $0.uid }) } }
             .onDisappear { reg?.remove() }
         }
     }
@@ -80,6 +134,8 @@ struct PrivateChatView: View {
     @State private var photoItem: PhotosPickerItem?
     @State private var showInfo = false
     @State private var liveViewer: LiveTarget?
+    @State private var pinViewer: PinTarget?
+    @State private var cardTarget: ProfileCardTarget?
     @State private var reg: ListenerRegistration?
     @State private var chatReg: ListenerRegistration?
     @ObservedObject private var trip = TripManager.shared
@@ -90,11 +146,23 @@ struct PrivateChatView: View {
          otherUid: profiles.tag(otherUid).isEmpty ? otherTag : profiles.tag(otherUid)]
     }
 
+    // Unsend — soft tombstone; refresh the inbox preview when it was the newest message.
+    private func deleteMsg(_ m: GroupMessage) {
+        PrivateMessages.unsendMessage(chatId, mid: m.id, isLast: messages.last?.id == m.id)
+    }
+
     var body: some View {
         VStack(spacing: 0) {
             ChatMessageList(messages: messages, myUid: myUid, photos: profiles.photos,
                             reads: chat?.reads ?? [:], tags: liveTags,
-                            onOpenLive: { m in liveViewer = LiveTarget(uid: m.liveFrom, name: "@\(m.fromTag)") })
+                            onOpenPin: { m in if let la = m.pinLat, let ln = m.pinLng { pinViewer = PinTarget(lat: la, lng: ln, name: m.pinName, note: m.pinNote) } },
+                            onOpenLive: { m in liveViewer = LiveTarget(uid: m.liveFrom, name: "@\(m.fromTag)") },
+                            onDelete: { m in deleteMsg(m) },
+                            onCommitEdit: { m, t in
+                                PrivateMessages.editMessage(chatId, mid: m.id, text: t,
+                                                            newPreview: messages.last?.id == m.id ? t : nil)
+                            },
+                            onTapUser: { uid, tag in cardTarget = ProfileCardTarget(uid: uid, tag: tag) })
             HStack(spacing: 8) {
                 PhotosPicker(selection: $photoItem, matching: .images) { Image(systemName: "photo").font(.title3) }
                 TextField("Message @\(otherTag)", text: $draft, axis: .vertical).lineLimit(1...4)
@@ -126,6 +194,8 @@ struct PrivateChatView: View {
         }
         .sheet(isPresented: $showInfo) { DMInfoSheet(otherUid: otherUid, otherTag: otherTag, messages: messages) }
         .sheet(item: $liveViewer) { t in LiveViewerSheet(uid: t.uid, name: t.name) }
+        .sheet(item: $pinViewer) { PinViewerSheet(pin: $0) }
+        .sheet(item: $cardTarget) { t in ProfileCard(uid: t.uid, fallbackTag: t.tag) }
         .onAppear {
             InAppNotifier.shared.activeChatKey = chatId
             ProfileStore.shared.observe([myUid, otherUid])
@@ -150,26 +220,42 @@ struct PrivateChatView: View {
 
 struct LiveTarget: Identifiable { let uid: String; let name: String; var id: String { uid } }
 
-// LiveLocationActivity.kt → SwiftUI. Follows live_shares/{uid} in real time on a mini map.
+// LiveLocationActivity.kt → SwiftUI. Real-time map of EVERYONE currently sharing with me (the tapped
+// person + anyone else in the group/thread) plus my own position — each rendered with their profile photo.
 struct LiveViewerSheet: View {
     @Environment(\.dismiss) private var dismiss
-    let uid: String
+    let uid: String        // the person whose card you tapped (used to centre + title)
     let name: String
-    @State private var state: LiveShare.State?
+    @State private var shares: [TripMember] = []   // others sharing with me (from live_shares/visibleTo)
     @State private var loaded = false
     @State private var camera: GMSCameraPosition?
     @State private var reg: ListenerRegistration?
+    @ObservedObject private var profiles = ProfileStore.shared
+    @StateObject private var myLoc = LocationManager()   // my own live position while the sheet is open
+
+    private var myUid: String { AuthService.currentUid ?? "" }
+
+    // My own avatar marker (profile photo) — follows my GPS live, like everyone else's.
+    private var meMarker: TripMember? {
+        guard let c = myLoc.location?.coordinate ?? AppState.shared.lastLocation else { return nil }
+        return TripMember(uid: myUid, tag: profiles.tag(myUid).ifEmptyThen(AppState.shared.userTag(myUid)),
+                          photo: profiles.photo(myUid).ifEmptyThen(AppState.shared.userPhoto(myUid)),
+                          lat: c.latitude, lng: c.longitude)
+    }
+    private var allMarkers: [TripMember] { shares + (meMarker.map { [$0] } ?? []) }
 
     var body: some View {
         NavigationStack {
             Group {
-                if let s = state, s.active, let lat = s.lat, let lng = s.lng {
+                if !shares.isEmpty {
                     VStack(spacing: 0) {
-                        GoogleMapView(places: [], pinHue: 0, pinIcon: "", pencilGlyph: "", dark: false, showPersonal: false,
-                                      liveShares: [TripMember(uid: uid, tag: name.replacingOccurrences(of: "@", with: ""), photo: s.photo, lat: lat, lng: lng)],
-                                      camera: $camera, onTapMarker: { _ in }, onLongPress: { _ in })
+                        // myUid stays "" here so my own marker renders too (the map hides only its own myUid).
+                        GoogleMapView(places: [], pinHue: 0, pinIcon: "", pencilGlyph: "",
+                                      dark: AppState.shared.darkMode, showPersonal: false,
+                                      liveShares: allMarkers, camera: $camera,
+                                      onTapMarker: { _ in }, onLongPress: { _ in })
                             .ignoresSafeArea(edges: .bottom)
-                        Text("🔴 Live · \(minutesLeft(s.expiresAt)) min left").bold().padding()
+                        Text("🔴 Live · \(shares.count) sharing").bold().padding()
                     }
                 } else if !loaded {
                     ProgressView()
@@ -177,21 +263,55 @@ struct LiveViewerSheet: View {
                     Text("\(name) is no longer sharing their location.").foregroundColor(.secondary).padding(32)
                 }
             }
-            .navigationTitle("\(name) · live")
+            .navigationTitle("Live location")
             .navigationBarTitleDisplayMode(.inline)
             .toolbar { ToolbarItem(placement: .cancellationAction) { Button("Close") { dismiss() } } }
             .onAppear {
-                reg = LiveShare.listen(uid) { s in
-                    state = s; loaded = true
-                    if let s, let lat = s.lat, let lng = s.lng { camera = GMSCameraPosition(latitude: lat, longitude: lng, zoom: 16) }
+                myLoc.start()
+                reg = LiveShare.listenVisible(myUid) { states in
+                    shares = states.compactMap { s in
+                        guard let lat = s.lat, let lng = s.lng else { return nil }
+                        return TripMember(uid: s.uid, tag: profiles.tag(s.uid).ifEmptyThen(s.tag),
+                                          photo: profiles.photo(s.uid).ifEmptyThen(s.photo), lat: lat, lng: lng)
+                    }
+                    loaded = true
+                    // Centre on the tapped person the first time we get a fix (else the first sharer).
+                    if camera == nil, let focus = shares.first(where: { $0.uid == uid }) ?? shares.first,
+                       let lat = focus.lat, let lng = focus.lng {
+                        camera = GMSCameraPosition(latitude: lat, longitude: lng, zoom: 15)
+                    }
                 }
             }
-            .onDisappear { reg?.remove() }
+            .onDisappear { reg?.remove(); myLoc.stop() }
         }
     }
+}
 
-    private func minutesLeft(_ expiresAtMillis: TimeInterval) -> Int {
-        max(0, Int((expiresAtMillis - Date().timeIntervalSince1970 * 1000) / 60000))
+private extension String {
+    func ifEmptyThen(_ fallback: String) -> String { isEmpty ? fallback : self }
+}
+
+struct PinTarget: Identifiable { let lat, lng: Double; let name, note: String; var id: String { "\(lat),\(lng)" } }
+
+// Shared-pin viewer: a chat pin dropped into a message, shown on the map so you can see where it is.
+struct PinViewerSheet: View {
+    @Environment(\.dismiss) private var dismiss
+    let pin: PinTarget
+    @State private var camera: GMSCameraPosition?
+
+    var body: some View {
+        NavigationStack {
+            GoogleMapView(places: [SavedPlace(key: locationKey(pin.lat, pin.lng), lat: pin.lat, lng: pin.lng,
+                                              name: pin.name, note: pin.note)],
+                          pinHue: 200, pinIcon: "📍", pencilGlyph: "📍",
+                          dark: AppState.shared.darkMode, showPersonal: true,
+                          camera: $camera, onTapMarker: { _ in }, onLongPress: { _ in })
+                .ignoresSafeArea(edges: .bottom)
+                .navigationTitle(pin.name.isEmpty ? "Shared location" : pin.name)
+                .navigationBarTitleDisplayMode(.inline)
+                .toolbar { ToolbarItem(placement: .cancellationAction) { Button("Close") { dismiss() } } }
+                .onAppear { camera = GMSCameraPosition(latitude: pin.lat, longitude: pin.lng, zoom: 16) }
+        }
     }
 }
 
@@ -200,18 +320,22 @@ struct DMInfoSheet: View {
     let otherUid: String
     let otherTag: String
     let messages: [GroupMessage]
-    @State private var photo = ""
-    @State private var banner = ""
+    @ObservedObject private var profiles = ProfileStore.shared
 
     private var recentImages: [GroupMessage] { messages.filter { !$0.image.isEmpty }.suffix(12).reversed() }
+    private var liveTag: String { profiles.tag(otherUid).isEmpty ? otherTag : profiles.tag(otherUid) }
 
     var body: some View {
         NavigationStack {
             List {
                 Section {
                     VStack(spacing: 0) {
-                        ProfileHeader(banner: banner, photo: photo, tag: otherTag)
-                        Text("@\(otherTag)").font(.title3).bold().frame(maxWidth: .infinity)
+                        // Live photo + banner — a profile edit by the other person reflects here immediately.
+                        ProfileHeader(banner: profiles.banner(otherUid), photo: profiles.photo(otherUid), tag: liveTag)
+                        if !profiles.name(otherUid).isEmpty {
+                            Text(profiles.name(otherUid)).font(.title3).bold().frame(maxWidth: .infinity)
+                        }
+                        Text("@\(liveTag)").font(.subheadline).foregroundColor(.secondary).frame(maxWidth: .infinity)
                     }.listRowInsets(EdgeInsets())
                 }
                 if !recentImages.isEmpty {
@@ -232,10 +356,7 @@ struct DMInfoSheet: View {
             .navigationTitle("Chat info")
             .navigationBarTitleDisplayMode(.inline)
             .toolbar { ToolbarItem(placement: .cancellationAction) { Button("Done") { dismiss() } } }
-            .onAppear {
-                Profiles.fetchProfile(otherUid) { photo = $0?.photo ?? "" }
-                Profiles.fetchBanner(otherUid) { banner = $0 }
-            }
+            .onAppear { profiles.observe(otherUid); profiles.observeBanner(otherUid) }
         }
     }
 }

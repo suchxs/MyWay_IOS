@@ -1,37 +1,6 @@
-// GroupsActivity.kt → SwiftUI. List my groups, create a new one from friends, open chat.
+// Create a group from friends — reached via the + in the unified Messages inbox (groups + DMs are fused).
 import SwiftUI
 import FirebaseFirestore
-
-struct GroupsView: View {
-    let myUid: String
-    let myTag: String
-    @State private var groups: [TravelGroup] = []
-    @State private var showCreate = false
-    @State private var reg: ListenerRegistration?
-
-    var body: some View {
-        List(groups) { g in
-            NavigationLink { GroupChatView(group: g, myUid: myUid, myTag: myTag) } label: {
-                HStack {
-                    AvatarCircle(photoBase64: g.photo, tag: g.name, size: 44)
-                    VStack(alignment: .leading) {
-                        HStack {
-                            Text(g.name).bold()
-                            if g.tripActive { Text("LIVE").font(.caption2).bold().foregroundColor(.white)
-                                .padding(.horizontal, 6).padding(.vertical, 2).background(Color.red).clipShape(Capsule()) }
-                        }
-                        Text("\(g.members.count) members").font(.caption).foregroundColor(.secondary)
-                    }
-                }
-            }
-        }
-        .navigationTitle("Groups")
-        .toolbar { ToolbarItem(placement: .primaryAction) { Button { showCreate = true } label: { Image(systemName: "plus") } } }
-        .sheet(isPresented: $showCreate) { CreateGroupSheet(myUid: myUid, myTag: myTag) }
-        .onAppear { reg = Groups.listenMyGroups(myUid) { groups = $0 } }
-        .onDisappear { reg?.remove() }
-    }
-}
 
 struct CreateGroupSheet: View {
     @Environment(\.dismiss) private var dismiss
@@ -41,6 +10,7 @@ struct CreateGroupSheet: View {
     @State private var friends: [UserHit] = []
     @State private var selected: Set<String> = []
     @State private var reg: ListenerRegistration?
+    @ObservedObject private var profiles = ProfileStore.shared
 
     var body: some View {
         NavigationStack {
@@ -51,8 +21,9 @@ struct CreateGroupSheet: View {
                         Button {
                             if selected.contains(f.uid) { selected.remove(f.uid) } else { selected.insert(f.uid) }
                         } label: {
-                            HStack {
-                                Text("@\(f.tag)")
+                            HStack(spacing: 10) {
+                                AvatarCircle(photoBase64: profiles.photo(f.uid), tag: profiles.tag(f.uid).isEmpty ? f.tag : profiles.tag(f.uid), size: 32)
+                                Text("@\(profiles.tag(f.uid).isEmpty ? f.tag : profiles.tag(f.uid))")
                                 Spacer()
                                 if selected.contains(f.uid) { Image(systemName: "checkmark").foregroundColor(Brand.teal) }
                             }
@@ -71,7 +42,7 @@ struct CreateGroupSheet: View {
                     }.disabled(name.trimmed.isEmpty)
                 }
             }
-            .onAppear { reg = Friends.listenFriends(myUid) { friends = $0 } }
+            .onAppear { reg = Friends.listenFriends(myUid) { friends = $0; ProfileStore.shared.observe($0.map { $0.uid }) } }
             .onDisappear { reg?.remove() }
         }
     }

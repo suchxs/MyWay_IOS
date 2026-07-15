@@ -1,7 +1,7 @@
 // Sidebar.kt → SwiftUI slide-in drawer: profile header + PLACES / SOCIAL / SETTINGS nav.
 import SwiftUI
 
-enum SidebarDestination { case waypoints, collections, messages, friends, groups, settings, profile }
+enum SidebarDestination { case waypoints, collections, messages, friends, settings, profile }
 
 struct Sidebar: View {
     @EnvironmentObject var state: AppState
@@ -49,7 +49,6 @@ struct Sidebar: View {
                     section("SOCIAL")
                     item("bubble.left.and.bubble.right", "Messages") { onNavigate(.messages) }
                     item("person.2", "Friends") { onNavigate(.friends) }
-                    item("safari", "Groups") { onNavigate(.groups) }
                     section("SETTINGS")
                     item("gearshape", "Settings") { onNavigate(.settings) }
                     HStack {

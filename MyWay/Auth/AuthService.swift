@@ -35,6 +35,27 @@ enum AuthService {
         GIDSignIn.sharedInstance.signOut()
     }
 
+    /// Delete the user's cloud data AND their Firebase Auth account, so they can't just sign back in.
+    /// Firestore data is removed first (needs auth), then the account. Auth may demand a recent login.
+    static func deleteAccount(uid: String, tagLower: String, completion: @escaping (String?) -> Void) {
+        FcmTokens.unregister(uid)
+        Profiles.deleteMyData(uid, tagLower: tagLower) { err in
+            if let err { completion(err); return }
+            Task { @MainActor in AppState.shared.clearMyPlaces() }
+            guard let user = Auth.auth().currentUser else { signOut(); completion(nil); return }
+            user.delete { e in
+                if let e = e as NSError?, e.code == AuthErrorCode.requiresRecentLogin.rawValue {
+                    // Data's gone; account survives. Signing out sends them to login to reauth + retry.
+                    signOut()
+                    completion("For security, sign in again then tap Delete once more to fully remove your account.")
+                    return
+                }
+                signOut()   // no-op once the account is gone, but clears GoogleSignIn state
+                completion(e?.localizedDescription)
+            }
+        }
+    }
+
     // ── Google ────────────────────────────────────────────────────────────────────
     static func signInWithGoogle(completion: @escaping (Error?) -> Void) {
         guard let clientID = FirebaseApp.app()?.options.clientID,

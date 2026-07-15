@@ -55,6 +55,20 @@ struct RoutePlanner: View {
                 }
                 Button { onStart() } label: { Label("Start", systemImage: "location.north.line.fill").bold().frame(maxWidth: .infinity) }
                     .buttonStyle(.borderedProminent).tint(Brand.teal)
+
+                // Sequential turn-by-turn list (DirectionsUi.kt's step LazyColumn). Transit steps read
+                // "Take <line> toward <headsign>", so you can see exactly which ride to catch.
+                if !r.steps.isEmpty {
+                    Divider().padding(.top, 2)
+                    ScrollView {
+                        VStack(spacing: 0) {
+                            ForEach(Array(r.steps.enumerated()), id: \.offset) { i, step in
+                                StepRow(step: step, last: i == r.steps.count - 1)
+                                if i != r.steps.count - 1 { Divider().padding(.leading, 46) }
+                            }
+                        }
+                    }.frame(maxHeight: 240)
+                }
             } else if let err = nav.errorText {
                 Text(err).foregroundColor(.secondary).font(.footnote).fixedSize(horizontal: false, vertical: true)
             } else {
@@ -118,14 +132,44 @@ struct NavFooter: View {
     }
 }
 
+// One turn in the planner's step list — maneuver icon + instruction + distance to the following turn.
+struct StepRow: View {
+    let step: RouteStep
+    var last: Bool
+    var body: some View {
+        HStack(alignment: .top, spacing: 12) {
+            Image(systemName: maneuverIcon(step.maneuver)).font(.system(size: 15, weight: .semibold))
+                .foregroundColor(Brand.tealDeep).frame(width: 34, height: 34)
+                .background(Brand.teal.opacity(0.12)).clipShape(Circle())
+            VStack(alignment: .leading, spacing: 2) {
+                Text(step.instruction).font(.subheadline).fixedSize(horizontal: false, vertical: true)
+                if step.distanceMeters > 0, !last {
+                    Text(formatDistance(step.distanceMeters)).font(.caption).foregroundColor(.secondary)
+                }
+            }
+            Spacer(minLength: 0)
+        }.padding(.vertical, 10).padding(.horizontal, 2)
+    }
+}
+
 func maneuverIcon(_ m: String) -> String {
     let s = m.uppercased()
-    if s.contains("UTURN") { return "arrow.uturn.down" }
-    if s.contains("LEFT") { return "arrow.turn.up.left" }
-    if s.contains("RIGHT") { return "arrow.turn.up.right" }
     if s.contains("TRANSIT") { return "bus.fill" }
-    if s.contains("MERGE") || s.contains("RAMP") || s.contains("FORK") { return "arrow.triangle.merge" }
-    if s.contains("ROUNDABOUT") || s.contains("ROTARY") { return "arrow.clockwise.circle" }
-    if s.contains("DESTINATION") { return "mappin.circle.fill" }
-    return "arrow.up"
+    if s.contains("UTURN") { return "arrow.uturn.down" }
+    if s.contains("ROUNDABOUT") || s.contains("ROTARY") || s.contains("CIRCLE") { return "arrow.clockwise.circle" }
+    if s.contains("MERGE") { return "arrow.merge" }
+    if s.contains("FORK") || s.contains("RAMP") { return "arrow.triangle.branch" }
+    if s.contains("LEFT") {
+        if s.contains("SHARP") { return "arrow.turn.down.left" }
+        if s.contains("SLIGHT") { return "arrow.up.left" }
+        return "arrow.turn.up.left"
+    }
+    if s.contains("RIGHT") {
+        if s.contains("SHARP") { return "arrow.turn.down.right" }
+        if s.contains("SLIGHT") { return "arrow.up.right" }
+        return "arrow.turn.up.right"
+    }
+    if s.contains("DESTINATION") || s.contains("ARRIVE") { return "mappin.circle.fill" }
+    if s.contains("DEPART") || s.contains("START") { return "location.north.line.fill" }
+    return "arrow.up"   // STRAIGHT / CONTINUE / default
 }

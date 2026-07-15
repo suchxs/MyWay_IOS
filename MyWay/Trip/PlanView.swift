@@ -14,7 +14,11 @@ struct PlanView: View {
     @State private var plan: TripPlan?
     @State private var planName = ""
     @State private var newObjective = ""
+    @State private var showSearch = false
+    @State private var pending: PendingObjective?     // a searched place waiting to be named + added
     @State private var reg: ListenerRegistration?
+
+    struct PendingObjective { let name: String; let lat, lng: Double }
 
     var body: some View {
         NavigationStack {
@@ -78,15 +82,31 @@ struct PlanView: View {
                 }
             }
             Section("Add objective") {
-                TextField("Name (optional)", text: $newObjective)
-                Button {
-                    if let c = AppState.shared.lastLocation { addItem(name: newObjective, lat: c.latitude, lng: c.longitude) }
-                } label: { Label("Add at my location", systemImage: "location.fill") }.tint(Brand.teal)
-                ForEach(tripPins) { pin in
+                // Search a place (Android's AddObjectiveField) → pick → name the activity → add.
+                Button { showSearch = true } label: { Label("Search a place", systemImage: "magnifyingglass") }.tint(Brand.teal)
+
+                if let p = pending {
+                    TextField("Name / activity", text: $newObjective)
                     Button {
-                        addItem(name: newObjective.isEmpty ? pin.name : newObjective, lat: pin.lat, lng: pin.lng)
-                    } label: { Label(pin.name.isEmpty ? "Trip pin by @\(pin.fromTag)" : pin.name, systemImage: "mappin") }
+                        addItem(name: newObjective.trimmed.isEmpty ? p.name : newObjective.trimmed, lat: p.lat, lng: p.lng)
+                        pending = nil
+                    } label: { Label("Add “\(newObjective.trimmed.isEmpty ? p.name : newObjective.trimmed)”", systemImage: "plus.circle.fill") }
+                        .tint(Brand.teal)
                 }
+
+                if !tripPins.isEmpty {
+                    ForEach(tripPins) { pin in
+                        Button {
+                            addItem(name: pin.name.isEmpty ? "Trip pin by @\(pin.fromTag)" : pin.name, lat: pin.lat, lng: pin.lng)
+                        } label: { Label(pin.name.isEmpty ? "Trip pin by @\(pin.fromTag)" : pin.name, systemImage: "mappin") }
+                    }
+                }
+            }
+        }
+        .sheet(isPresented: $showSearch) {
+            PlaceSearchView { _, name, coord in
+                pending = PendingObjective(name: name, lat: coord.latitude, lng: coord.longitude)
+                newObjective = name
             }
         }
     }

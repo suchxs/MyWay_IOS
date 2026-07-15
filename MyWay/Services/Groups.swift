@@ -51,7 +51,9 @@ enum Groups {
                      tags: d.get("tags") as? [String: String] ?? [:],
                      photo: d.get("photo") as? String ?? "",
                      tripActive: d.get("tripActive") as? Bool ?? false,
-                     reads: d.get("reads") as? [String: Int64] ?? [:])
+                     reads: d.get("reads") as? [String: Int64] ?? [:],
+                     lastMsg: d.get("lastMsg") as? String ?? "",
+                     lastTs: d.get("lastTs") as? Int64 ?? 0)
     }
 
     static func updatePhoto(_ gid: String, base64: String, onDone: @escaping (String?) -> Void) {
@@ -72,6 +74,8 @@ enum Groups {
                                  pinPlaceId: d.get("pinPlaceId") as? String ?? "",
                                  system: d.get("system") as? Bool ?? false,
                                  liveFrom: d.get("liveFrom") as? String ?? "",
+                                 edited: d.get("edited") as? Bool ?? false,
+                                 unsent: d.get("unsent") as? Bool ?? false,
                                  ts: d.get("ts") as? Int64 ?? 0)
                 })
             }
@@ -79,6 +83,27 @@ enum Groups {
 
     static func markRead(_ gid: String, uid: String, ts: Int64) {
         db.collection("groups").document(gid).updateData(["reads.\(uid)": ts])
+    }
+
+    /// Edit a text message (author only, enforced by rules). Flags it edited; refreshes the inbox
+    /// preview when it was the newest message.
+    static func editMessage(_ gid: String, mid: String, text: String, newPreview: String?) {
+        let body = text.trimmingCharacters(in: .whitespaces)
+        guard !body.isEmpty else { return }
+        let gref = db.collection("groups").document(gid)
+        gref.collection("messages").document(mid).updateData(["text": body, "edited": true])
+        if newPreview != nil { gref.updateData(["lastMsg": body]) }
+    }
+
+    /// Unsend a message (author only). Soft-delete: the message stays as a tombstone ("… unsent a
+    /// message") with its content cleared. Updates the inbox preview when it was the newest message.
+    static func unsendMessage(_ gid: String, mid: String, isLast: Bool) {
+        let gref = db.collection("groups").document(gid)
+        gref.collection("messages").document(mid).updateData([
+            "unsent": true, "text": "", "image": "", "liveFrom": "", "edited": false,
+            "pinLat": FieldValue.delete(), "pinLng": FieldValue.delete(), "pinName": "", "pinNote": "", "pinPlaceId": "",
+        ])
+        if isLast { gref.updateData(["lastMsg": "Unsent a message"]) }
     }
 
     static func sendMessage(_ gid: String, fromUid: String, fromTag: String, text: String) {
@@ -109,8 +134,28 @@ enum Groups {
 
     private static func post(_ gid: String, _ fields: [String: Any]) {
         var f = fields
-        f["ts"] = Int64(Date().timeIntervalSince1970 * 1000)   // client millis, matches Android ordering
-        db.collection("groups").document(gid).collection("messages").document().setData(f)
+        let ts = Int64(Date().timeIntervalSince1970 * 1000)   // client millis, matches Android ordering
+        f["ts"] = ts
+        let gref = db.collection("groups").document(gid)
+        let batch = db.batch()
+        batch.setData(f, forDocument: gref.collection("messages").document())
+        // Mirror DMs: keep an inbox preview on the group doc so the unified Messages list can sort/show it.
+        batch.setData(["lastMsg": previewOf(f), "lastTs": ts], forDocument: gref, merge: true)
+        batch.commit()
+    }
+
+    /// Inbox preview for a message (media get an emoji label; text is shown verbatim).
+    static func previewOf(_ f: [String: Any]) -> String {
+        if let img = f["image"] as? String, !img.isEmpty { return "📷 Photo" }
+        if let live = f["liveFrom"] as? String, !live.isEmpty { return "🔴 Live location" }
+        if f["pinLat"] != nil { return "📍 " + ((f["pinName"] as? String).flatMap { $0.isEmpty ? nil : $0 } ?? "Location") }
+        return f["text"] as? String ?? ""
+    }
+    static func previewOf(_ m: GroupMessage) -> String {
+        if !m.image.isEmpty { return "📷 Photo" }
+        if !m.liveFrom.isEmpty { return "🔴 Live location" }
+        if m.pinLat != nil { return "📍 " + (m.pinName.isEmpty ? "Location" : m.pinName) }
+        return m.text
     }
 
     // ── Membership / roles ────────────────────────────────────────────────────────
@@ -136,5 +181,13 @@ enum Groups {
 
     static func leaveGroup(_ gid: String, uid: String, onDone: @escaping (String?) -> Void) {
         kickMember(gid, uid: uid, onDone: onDone)
+    }
+
+    /// Delete a group. Ends any live trip first so participant docs are removed — otherwise every
+    /// member's map keeps their avatar markers (Firestore doesn't cascade-delete subcollections/queries).
+    static func deleteGroup(_ gid: String, onDone: @escaping () -> Void = {}) {
+        Trip.endSession(gid) { _ in
+            db.collection("groups").document(gid).delete { _ in onDone() }
+        }
     }
 }

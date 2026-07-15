@@ -63,6 +63,8 @@ struct TravelGroup: Identifiable, Equatable {
     var photo: String = ""
     var tripActive: Bool = false
     var reads: [String: Int64] = [:]
+    var lastMsg: String = ""
+    var lastTs: Int64 = 0
 
     func isAdmin(_ uid: String) -> Bool { uid == owner || admins.contains(uid) }
     func tagOf(_ uid: String) -> String { tags[uid] ?? "unknown" }
@@ -81,6 +83,8 @@ struct GroupMessage: Identifiable, Equatable {
     var pinPlaceId: String = ""
     var system: Bool = false
     var liveFrom: String = ""
+    var edited: Bool = false
+    var unsent: Bool = false
     var ts: Int64 = 0
 }
 

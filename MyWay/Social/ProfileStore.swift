@@ -11,7 +11,9 @@ final class ProfileStore: ObservableObject {
     @Published private(set) var photos: [String: String] = [:]
     @Published private(set) var tags: [String: String] = [:]
     @Published private(set) var names: [String: String] = [:]   // "First Last"
+    @Published private(set) var banners: [String: String] = [:]
     private var regs: [String: ListenerRegistration] = [:]
+    private var bannerRegs: [String: ListenerRegistration] = [:]
 
     func observe(_ uids: [String]) { uids.forEach { observe($0) } }
 
@@ -30,10 +32,21 @@ final class ProfileStore: ObservableObject {
 
     func photo(_ uid: String) -> String { photos[uid] ?? "" }
     func tag(_ uid: String) -> String { tags[uid] ?? "" }
+    func name(_ uid: String) -> String { names[uid] ?? "" }
+    func banner(_ uid: String) -> String { banners[uid] ?? "" }
+
+    /// Live-follow a user's banner (separate doc: user_banners/{uid}). Used by profile/chat-info sheets.
+    func observeBanner(_ uid: String) {
+        guard !uid.isEmpty, bannerRegs[uid] == nil else { return }
+        bannerRegs[uid] = Firestore.firestore().collection("user_banners").document(uid).addSnapshotListener { [weak self] d, _ in
+            Task { @MainActor in self?.banners[uid] = d?.get("banner") as? String ?? "" }
+        }
+    }
 
     /// Optimistic local update right after you change your own profile (before the listener echoes back).
-    func setLocal(uid: String, photo: String? = nil, tag: String? = nil) {
+    func setLocal(uid: String, photo: String? = nil, tag: String? = nil, banner: String? = nil) {
         if let photo { photos[uid] = photo }
         if let tag { tags[uid] = tag }
+        if let banner { banners[uid] = banner }
     }
 }

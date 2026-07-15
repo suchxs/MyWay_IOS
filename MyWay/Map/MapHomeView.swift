@@ -95,7 +95,7 @@ struct MapHomeView: View {
 
             if drawerOpen { drawerOverlay }
         }
-        .onChange(of: navModel.navigating) { on in loc.navMode(on) }
+        .onChange(of: navModel.navigating) { on in loc.navMode(on); if on { mapHolder.setHeading(false) } }
         .onChange(of: trip.currentGid) { gid in if gid != nil { nav = nil } }   // joining a trip → back to the map
         .onChange(of: navModel.routes.count) { _ in
             fitRoute()
@@ -301,10 +301,16 @@ struct MapHomeView: View {
             HStack {
                 Spacer()
                 VStack(spacing: 12) {
-                    // Compass — only when the map is rotated (and not navigating).
-                    if !navModel.navigating, abs(mapHolder.bearing) > 0.5 {
+                    // Compass — only when the map is rotated, not navigating, and not in heading mode.
+                    if !navModel.navigating, !mapHolder.headingMode, abs(mapHolder.bearing) > 0.5 {
                         circleButton("location.north.line.fill", tint: .primary) { mapHolder.resetNorth() }
                             .rotationEffect(.degrees(-mapHolder.bearing))
+                    }
+                    // Heading-up ("gyro") toggle — rotates the map to the way you're facing. Only off-nav.
+                    if !navModel.navigating, loc.location != nil {
+                        circleButton("safari.fill", tint: mapHolder.headingMode ? Brand.teal : .primary) {
+                            mapHolder.setHeading(!mapHolder.headingMode)
+                        }
                     }
                     // Recenter follow while navigating; My Location otherwise (always available, like Google Maps).
                     if navModel.navigating {
@@ -405,7 +411,6 @@ struct MapHomeView: View {
     private func destinationView(_ d: SidebarDestination) -> some View {
         switch d {
         case .friends:     FriendsView(myUid: uid, myTag: myTag)
-        case .groups:      GroupsView(myUid: uid, myTag: myTag)
         case .messages:    MessagesView(myUid: uid, myTag: myTag)
         case .collections: CollectionsView()
         case .waypoints:   WaypointsView(onFocus: { coord in nav = nil; center(on: coord) })
