@@ -25,6 +25,12 @@ final class LocationManager: NSObject, ObservableObject, CLLocationManagerDelega
 
     func stop() { manager.stopUpdatingLocation() }
 
+    /// During turn-by-turn we want every fix (smooth follow); otherwise throttle to save battery.
+    func navMode(_ on: Bool) {
+        manager.distanceFilter = on ? kCLDistanceFilterNone : 15
+        manager.desiredAccuracy = on ? kCLLocationAccuracyBestForNavigation : kCLLocationAccuracyBest
+    }
+
     nonisolated func locationManager(_ manager: CLLocationManager, didUpdateLocations locations: [CLLocation]) {
         guard let loc = locations.last else { return }
         Task { @MainActor in

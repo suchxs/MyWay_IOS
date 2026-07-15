@@ -17,7 +17,7 @@ struct TripPin: Identifiable, Equatable {
     let lat, lng: Double
     var name, note: String
 }
-struct TripDest: Equatable {
+struct TripDest: Equatable, Identifiable {
     let id: String; let lat, lng: Double
     let name, by, byTag: String
     let done: [String]; var planItemId = ""
@@ -61,6 +61,9 @@ enum Trip {
     static func leave(_ uid: String, onDone: @escaping (String?) -> Void) {
         meRef(uid).delete { onDone($0?.localizedDescription) }
     }
+
+    /// Update my participant marker's photo (e.g. after changing it mid-trip). No-op if not in a trip.
+    static func updatePhoto(_ uid: String, photo: String) { meRef(uid).updateData(["photo": photo]) }
 
     /// Fire-and-forget live-location update + heartbeat. update() so a left/deleted doc stays gone.
     static func updateLocation(_ uid: String, lat: Double, lng: Double) {
@@ -239,6 +242,13 @@ enum Trip {
         edit(gid, actorUid: actorUid, actorTag: actorTag, onDone: onDone) { cur in
             guard let cur else { return nil }
             cur.items.append(PlanItem(id: newId(), name: name, lat: lat, lng: lng, finished: false)); return cur
+        }
+    }
+
+    static func prependPlanItem(_ gid: String, name: String, lat: Double, lng: Double, actorUid: String, actorTag: String, onDone: @escaping (String?) -> Void) {
+        edit(gid, actorUid: actorUid, actorTag: actorTag, onDone: onDone) { cur in
+            guard let cur else { return nil }
+            cur.items.insert(PlanItem(id: newId(), name: name, lat: lat, lng: lng, finished: false), at: 0); return cur
         }
     }
 

@@ -14,11 +14,13 @@ final class Router: ObservableObject {
         handle = Auth.auth().addStateDidChangeListener { [weak self] _, user in
             guard let self else { return }
             guard let user, user.isEmailVerified else {
-                state.unbindUser(); self.route = .login; return
+                state.unbindUser(); InAppNotifier.shared.stop(); self.route = .login; return
             }
             state.bindUser(user.uid)
             FcmTokens.register(user.uid)
             TripManager.shared.bind(uid: user.uid, tag: state.userTag(user.uid), photo: state.userPhoto(user.uid))
+            InAppNotifier.shared.start(user.uid)
+            ProfileStore.shared.observe(user.uid)
             // Skip a Firestore read when we've cached the @tag; else fall back to fetchTag.
             if !state.userTag(user.uid).isEmpty { self.route = .main; return }
             Profiles.fetchTag(user.uid) { tag in
@@ -44,6 +46,7 @@ struct RootView: View {
             case .main:       MapHomeView()
             }
         }
+        .overlay(alignment: .top) { if router.route == .main { NoticeBanner() } }
         .onAppear { router.start(state) }
     }
 }

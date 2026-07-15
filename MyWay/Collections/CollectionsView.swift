@@ -24,14 +24,8 @@ struct CollectionsView: View {
                     }
                 }
             }
-            Section("All pins (\(state.places.count))") {
-                ForEach(state.places) { p in
-                    VStack(alignment: .leading) {
-                        Text(p.name.isEmpty ? (p.isLandmark ? "Landmark" : "Saved pin") : p.name).bold()
-                        if !p.note.isEmpty { Text(p.note).font(.caption).foregroundColor(.secondary) }
-                        Text(p.key).font(.caption2).foregroundColor(.secondary)
-                    }
-                }
+            if state.collections.isEmpty {
+                Section { Text("No collections yet. Tap + to group your waypoints into a collection.").foregroundColor(.secondary) }
             }
         }
         .navigationTitle("Collections")

@@ -1,5 +1,5 @@
-// GroupChatActivity.kt → SwiftUI. Text + image + shared-pin messages, read receipts, roster/info sheet.
-// Live-location cards and the in-chat trip controls are deferred with the Trips feature (see SETUP.md).
+// GroupChatActivity.kt → SwiftUI. Text + image + shared-pin messages with avatars, read receipts, and a
+// group-info sheet (photo, recent images, member roster with roles). Live via Firestore listeners.
 import SwiftUI
 import PhotosUI
 import FirebaseFirestore
@@ -10,46 +10,52 @@ struct GroupChatView: View {
     let myTag: String
 
     @State private var messages: [GroupMessage] = []
+    @State private var liveGroup: TravelGroup?
     @State private var draft = ""
     @State private var photoItem: PhotosPickerItem?
     @State private var showInfo = false
+    @State private var liveViewer: LiveTarget?
     @State private var reg: ListenerRegistration?
     @State private var groupReg: ListenerRegistration?
-    @State private var tripActive = false
     @ObservedObject private var trip = TripManager.shared
+    @ObservedObject private var profiles = ProfileStore.shared
+
+    private var g: TravelGroup { liveGroup ?? group }
+    private var liveTags: [String: String] { g.tags.merging(profiles.tags) { _, live in live } }
 
     var body: some View {
         VStack(spacing: 0) {
             tripBar
-            ScrollViewReader { proxy in
-                ScrollView {
-                    LazyVStack(spacing: 8) {
-                        ForEach(messages) { m in MessageRow(message: m, mine: m.from == myUid) }
-                    }.padding(12)
-                }
-                .onChange(of: messages.count) { _ in
-                    if let last = messages.last { withAnimation { proxy.scrollTo(last.id, anchor: .bottom) } }
-                }
-            }
+            ChatMessageList(messages: messages, myUid: myUid, photos: profiles.photos,
+                            reads: g.reads, tags: liveTags,
+                            onOpenLive: { m in liveViewer = LiveTarget(uid: m.liveFrom, name: "@\(liveTags[m.from] ?? m.fromTag)") })
             composer
         }
-        .navigationTitle(group.name)
+        .sheet(item: $liveViewer) { t in LiveViewerSheet(uid: t.uid, name: t.name) }
+        .navigationTitle(g.name)
         .navigationBarTitleDisplayMode(.inline)
         .toolbar { ToolbarItem(placement: .primaryAction) { Button { showInfo = true } label: { Image(systemName: "info.circle") } } }
-        .sheet(isPresented: $showInfo) { GroupInfoSheet(gid: group.id, myUid: myUid) }
+        .sheet(isPresented: $showInfo) {
+            GroupInfoSheet(group: g, myUid: myUid, myTag: myTag, messages: messages, photos: profiles.photos)
+        }
         .onAppear {
-            tripActive = group.tripActive
+            InAppNotifier.shared.activeChatKey = group.id
             reg = Groups.listenMessages(group.id) { msgs in
                 messages = msgs
                 if let last = msgs.last { Groups.markRead(group.id, uid: myUid, ts: last.ts) }
             }
-            groupReg = Groups.listenGroup(group.id) { g in tripActive = g?.tripActive ?? false }
+            groupReg = Groups.listenGroup(group.id) { grp in
+                liveGroup = grp
+                if let grp { ProfileStore.shared.observe(grp.members) }   // live avatars + @tags
+            }
         }
-        .onDisappear { reg?.remove(); groupReg?.remove() }
+        .onDisappear { reg?.remove(); groupReg?.remove(); InAppNotifier.shared.activeChatKey = nil }
         .onChange(of: photoItem) { item in
+            guard let item else { return }
             Task {
-                guard let data = try? await item?.loadTransferable(type: Data.self), let img = UIImage(data: data) else { return }
-                Groups.sendImage(group.id, fromUid: myUid, fromTag: myTag, base64: Img.encode(img, maxDimension: 1024, quality: 0.6))
+                guard let data = try? await item.loadTransferable(type: Data.self), let img = UIImage(data: data) else { photoItem = nil; return }
+                Groups.sendImage(group.id, fromUid: myUid, fromTag: myTag, base64: Img.encode(img, maxDimension: 1000, quality: 0.5))
+                photoItem = nil   // reset so picking the same photo again re-fires
             }
         }
     }
@@ -68,110 +74,149 @@ struct GroupChatView: View {
         .background(.ultraThinMaterial)
     }
 
-    // Trip controls (GroupChatActivity's Start Trip button + TripBar).
     @ViewBuilder private var tripBar: some View {
         let inThisTrip = trip.currentGid == group.id
-        if tripActive || inThisTrip {
+        if g.tripActive || inThisTrip {
             HStack(spacing: 10) {
                 Circle().fill(Color.red).frame(width: 10, height: 10)
-                Text(inThisTrip ? "You're live • \(trip.members.count) sharing" : "Trip is live")
-                    .font(.subheadline).bold()
+                Text(inThisTrip ? "You're live • \(trip.members.count) sharing" : "Trip is live").font(.subheadline).bold()
                 Spacer()
                 if inThisTrip {
-                    Button("Leave") { trip.leaveTrip() }
-                        .buttonStyle(.borderedProminent).tint(Color(hex: 0xEF4444)).controlSize(.small)
-                    Button("End") { trip.endTrip() }
-                        .buttonStyle(.bordered).tint(Color(hex: 0xEF4444)).controlSize(.small)
+                    Button("Leave") { trip.leaveTrip() }.buttonStyle(.borderedProminent).tint(Color(hex: 0xEF4444)).controlSize(.small)
+                    Button("End") { trip.endTrip() }.buttonStyle(.bordered).tint(Color(hex: 0xEF4444)).controlSize(.small)
                 } else {
                     Button("Join") { trip.joinTrip(gid: group.id, groupName: group.name, tripActive: true) }
                         .buttonStyle(.borderedProminent).tint(Brand.teal).controlSize(.small)
                 }
-            }
-            .padding(.horizontal, 14).padding(.vertical, 8)
-            .background(Brand.teal.opacity(0.10))
+            }.padding(.horizontal, 14).padding(.vertical, 8).background(Brand.teal.opacity(0.10))
         } else {
             Button { trip.joinTrip(gid: group.id, groupName: group.name, tripActive: false) } label: {
-                Label("Start Trip", systemImage: "location.north.circle.fill").bold()
-                    .frame(maxWidth: .infinity)
-            }
-            .buttonStyle(.borderedProminent).tint(Brand.teal)
-            .padding(.horizontal, 14).padding(.vertical, 8)
-        }
-    }
-}
-
-private struct MessageRow: View {
-    let message: GroupMessage
-    let mine: Bool
-
-    var body: some View {
-        if message.system {
-            Text(message.text).font(.caption).foregroundColor(.secondary)
-                .padding(.horizontal, 12).padding(.vertical, 4)
-                .background(Color.gray.opacity(0.15)).clipShape(Capsule())
-                .frame(maxWidth: .infinity)
-        } else {
-            HStack {
-                if mine { Spacer() }
-                VStack(alignment: mine ? .trailing : .leading, spacing: 2) {
-                    if !mine { Text("@\(message.fromTag)").font(.caption2).foregroundColor(.secondary) }
-                    bubble
-                }
-                if !mine { Spacer() }
-            }
-        }
-    }
-
-    @ViewBuilder private var bubble: some View {
-        if let img = Img.decode(message.image) {
-            Image(uiImage: img).resizable().scaledToFit().frame(maxWidth: 220)
-                .clipShape(RoundedRectangle(cornerRadius: 14))
-        } else if message.pinLat != nil {
-            HStack { Image(systemName: "mappin.circle.fill").foregroundColor(Brand.teal)
-                Text(message.pinName.isEmpty ? "Shared location" : message.pinName).bold() }
-                .padding(10).background(Brand.teal.opacity(0.12)).clipShape(RoundedRectangle(cornerRadius: 14))
-        } else {
-            Text(message.text)
-                .padding(.horizontal, 12).padding(.vertical, 8)
-                .background(mine ? Brand.teal : Color.gray.opacity(0.18))
-                .foregroundColor(mine ? .white : .primary)
-                .clipShape(RoundedRectangle(cornerRadius: 16))
+                Label("Start Trip", systemImage: "location.north.circle.fill").bold().frame(maxWidth: .infinity)
+            }.buttonStyle(.borderedProminent).tint(Brand.teal).padding(.horizontal, 14).padding(.vertical, 8)
         }
     }
 }
 
 struct GroupInfoSheet: View {
     @Environment(\.dismiss) private var dismiss
-    let gid: String
+    let group: TravelGroup
     let myUid: String
-    @State private var group: TravelGroup?
-    @State private var reg: ListenerRegistration?
+    let myTag: String
+    let messages: [GroupMessage]
+    let photos: [String: String]
+    @ObservedObject private var profiles = ProfileStore.shared
+
+    @State private var photoItem: PhotosPickerItem?
+    @State private var showAdd = false
+    @State private var confirmDelete = false
+
+    private var iAmOwner: Bool { myUid == group.owner }
+    private var iAmAdmin: Bool { group.isAdmin(myUid) }
+    private var recentImages: [GroupMessage] { messages.filter { !$0.image.isEmpty }.suffix(12).reversed() }
 
     var body: some View {
         NavigationStack {
             List {
-                if let g = group {
-                    Section("Members") {
-                        ForEach(g.members, id: \.self) { uid in
-                            HStack {
-                                Text("@\(g.tagOf(uid))")
-                                if g.isAdmin(uid) { Text("admin").font(.caption2).foregroundColor(.secondary) }
-                                Spacer()
-                                if g.owner == myUid, uid != myUid {
-                                    Button(role: .destructive) { Groups.kickMember(gid, uid: uid) { _ in } } label: { Image(systemName: "person.badge.minus") }
+                Section {
+                    VStack(spacing: 8) {
+                        AvatarCircle(photoBase64: group.photo, tag: group.name, size: 96)
+                        if iAmAdmin {
+                            PhotosPicker(selection: $photoItem, matching: .images) {
+                                Text(group.photo.isEmpty ? "Add group photo" : "Change photo").foregroundColor(Brand.tealDeep)
+                            }
+                        }
+                        Text(group.name).font(.title3).bold()
+                    }.frame(maxWidth: .infinity)
+                }
+
+                if !recentImages.isEmpty {
+                    Section("Recent images") {
+                        ScrollView(.horizontal, showsIndicators: false) {
+                            HStack(spacing: 8) {
+                                ForEach(recentImages) { m in
+                                    if let img = Img.decode(m.image) {
+                                        Image(uiImage: img).resizable().scaledToFill()
+                                            .frame(width: 84, height: 84).clipShape(RoundedRectangle(cornerRadius: 10))
+                                    }
                                 }
                             }
                         }
                     }
-                    Section {
-                        Button(role: .destructive) { Groups.leaveGroup(gid, uid: myUid) { _ in }; dismiss() } label: { Text("Leave group") }
+                }
+
+                Section("Members (\(group.members.count))") {
+                    ForEach(group.members, id: \.self) { uid in memberRow(uid) }
+                    if iAmAdmin { Button { showAdd = true } label: { Label("Add member", systemImage: "person.badge.plus") } }
+                }
+
+                Section {
+                    if iAmOwner {
+                        Button("Delete group", role: .destructive) { confirmDelete = true }
+                    } else {
+                        Button("Leave group", role: .destructive) { Groups.leaveGroup(group.id, uid: myUid) { _ in }; dismiss() }
                     }
                 }
             }
             .navigationTitle("Group info")
             .navigationBarTitleDisplayMode(.inline)
             .toolbar { ToolbarItem(placement: .cancellationAction) { Button("Done") { dismiss() } } }
-            .onAppear { reg = Groups.listenGroup(gid) { group = $0 } }
+            .sheet(isPresented: $showAdd) { AddMemberSheet(group: group, myUid: myUid) }
+            .alert("Delete group?", isPresented: $confirmDelete) {
+                Button("Delete", role: .destructive) { Firestore.firestore().collection("groups").document(group.id).delete(); dismiss() }
+                Button("Cancel", role: .cancel) {}
+            }
+            .onChange(of: photoItem) { item in
+                Task {
+                    guard let data = try? await item?.loadTransferable(type: Data.self), let img = UIImage(data: data) else { return }
+                    Groups.updatePhoto(group.id, base64: Img.encode(img, maxDimension: 512, quality: 0.7)) { _ in }
+                }
+            }
+        }
+    }
+
+    private func memberRow(_ uid: String) -> some View {
+        let isOwner = uid == group.owner
+        let isAdmin = group.isAdmin(uid)
+        let canKick = iAmAdmin && !isOwner && uid != myUid
+        let liveTag = profiles.tag(uid).isEmpty ? group.tagOf(uid) : profiles.tag(uid)
+        return HStack {
+            AvatarCircle(photoBase64: profiles.photo(uid), tag: liveTag, size: 36)
+            VStack(alignment: .leading) {
+                Text("@\(liveTag)").bold()
+                if isOwner { Text("Owner").font(.caption2).foregroundColor(.secondary) }
+                else if isAdmin { Text("Admin").font(.caption2).foregroundColor(.secondary) }
+            }
+            Spacer()
+            if iAmOwner, !isOwner {
+                Button(isAdmin ? "Demote" : "Make admin") {
+                    Groups.setAdmin(group.id, uid: uid, makeAdmin: !isAdmin) { _ in }
+                }.font(.caption).tint(Brand.tealDeep)
+            }
+            if canKick {
+                Button(role: .destructive) { Groups.kickMember(group.id, uid: uid) { _ in } } label: { Image(systemName: "person.badge.minus") }
+            }
+        }
+    }
+}
+
+struct AddMemberSheet: View {
+    @Environment(\.dismiss) private var dismiss
+    let group: TravelGroup
+    let myUid: String
+    @State private var friends: [UserHit] = []
+    @State private var reg: ListenerRegistration?
+
+    var body: some View {
+        NavigationStack {
+            List(friends.filter { !group.members.contains($0.uid) }) { f in
+                Button { Groups.addMember(group.id, friend: f) { _ in }; dismiss() } label: {
+                    HStack { AvatarCircle(photoBase64: f.photo, tag: f.tag, size: 34); Text("@\(f.tag)").bold(); Spacer() }
+                }
+            }
+            .navigationTitle("Add member")
+            .navigationBarTitleDisplayMode(.inline)
+            .toolbar { ToolbarItem(placement: .cancellationAction) { Button("Cancel") { dismiss() } } }
+            .onAppear { reg = Friends.listenFriends(myUid) { friends = $0 } }
             .onDisappear { reg?.remove() }
         }
     }

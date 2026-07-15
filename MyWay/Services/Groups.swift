@@ -102,6 +102,11 @@ enum Groups {
         post(gid, ["from": "system", "fromTag": "", "text": text, "system": true])
     }
 
+    /// Announce a live-location share in a group chat; the card reads live_shares/{fromUid} when tapped.
+    static func postLiveShare(_ gid: String, fromUid: String, fromTag: String) {
+        post(gid, ["from": fromUid, "fromTag": fromTag, "text": "", "liveFrom": fromUid])
+    }
+
     private static func post(_ gid: String, _ fields: [String: Any]) {
         var f = fields
         f["ts"] = Int64(Date().timeIntervalSince1970 * 1000)   // client millis, matches Android ordering

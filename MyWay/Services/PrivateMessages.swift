@@ -9,6 +9,7 @@ struct PrivateChat: Identifiable, Equatable {
     let tags: [String: String]
     var lastMsg = ""
     var lastTs: Int64 = 0
+    var reads: [String: Int64] = [:]
     func otherUid(_ myUid: String) -> String { users.first { $0 != myUid } ?? "" }
     func otherTag(_ myUid: String) -> String { tags[otherUid(myUid)] ?? "User" }
 }
@@ -25,10 +26,24 @@ enum PrivateMessages {
                 let chats = snap.documents.compactMap { d -> PrivateChat? in
                     guard let users = d.get("users") as? [String] else { return nil }
                     return PrivateChat(id: d.documentID, users: users, tags: d.get("tags") as? [String: String] ?? [:],
-                                       lastMsg: d.get("lastMsg") as? String ?? "", lastTs: d.get("lastTs") as? Int64 ?? 0)
+                                       lastMsg: d.get("lastMsg") as? String ?? "", lastTs: d.get("lastTs") as? Int64 ?? 0,
+                                       reads: d.get("reads") as? [String: Int64] ?? [:])
                 }
                 onChange(chats.sorted { $0.lastTs > $1.lastTs })
             }
+    }
+
+    static func listenChat(_ chatId: String, onChange: @escaping (PrivateChat?) -> Void) -> ListenerRegistration {
+        db.collection("private_chats").document(chatId).addSnapshotListener { d, _ in
+            guard let d, d.exists, let users = d.get("users") as? [String] else { onChange(nil); return }
+            onChange(PrivateChat(id: chatId, users: users, tags: d.get("tags") as? [String: String] ?? [:],
+                                 lastMsg: d.get("lastMsg") as? String ?? "", lastTs: d.get("lastTs") as? Int64 ?? 0,
+                                 reads: d.get("reads") as? [String: Int64] ?? [:]))
+        }
+    }
+
+    static func markRead(_ chatId: String, uid: String, ts: Int64) {
+        db.collection("private_chats").document(chatId).updateData(["reads.\(uid)": ts])
     }
 
     static func listenMessages(_ chatId: String, onChange: @escaping ([GroupMessage]) -> Void) -> ListenerRegistration {
@@ -57,6 +72,12 @@ enum PrivateMessages {
         guard !base64.isEmpty else { return }
         post(chatId, fromUid: fromUid, fromTag: fromTag, otherUid: otherUid, otherTag: otherTag,
              preview: "📷 Image", msg: ["from": fromUid, "fromTag": fromTag, "text": "", "image": base64])
+    }
+
+    /// Announce a live-location share in the DM; the card reads live_shares/{fromUid} when tapped.
+    static func postLiveShare(_ chatId: String, fromUid: String, fromTag: String, otherUid: String, otherTag: String) {
+        post(chatId, fromUid: fromUid, fromTag: fromTag, otherUid: otherUid, otherTag: otherTag,
+             preview: "🔴 Live location", msg: ["from": fromUid, "fromTag": fromTag, "text": "", "liveFrom": fromUid])
     }
 
     private static func post(_ chatId: String, fromUid: String, fromTag: String, otherUid: String, otherTag: String,

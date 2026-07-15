@@ -91,4 +91,13 @@ enum Friends {
             onResult(snap?.documents.compactMap { ($0.get("users") as? [String])?.first { $0 != myUid } } ?? [])
         }
     }
+
+    static func fetchCloseFriendUids(_ myUid: String, onResult: @escaping ([String]) -> Void) {
+        db.collection("friendships").whereField("users", arrayContains: myUid).getDocuments { snap, _ in
+            onResult(snap?.documents.compactMap { d in
+                guard let users = d.get("users") as? [String], let other = users.first(where: { $0 != myUid }) else { return nil }
+                return (d.get("closeByUid") as? [String: Bool])?[myUid] == true ? other : nil
+            } ?? [])
+        }
+    }
 }

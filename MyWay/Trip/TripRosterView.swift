@@ -7,6 +7,7 @@ struct TripRosterView: View {
     @ObservedObject var trip: TripManager
     let myUid: String
     var myTag: String = ""
+    var onFollowDest: (TripDest) -> Void = { _ in }
     var onFocusMember: (CLLocationCoordinate2D) -> Void
 
     @State private var showDropPin = false
@@ -37,6 +38,9 @@ struct TripRosterView: View {
                     Section("Destination") {
                         Label(dest.name.isEmpty ? "Shared destination" : dest.name, systemImage: "flag.checkered")
                         Text("set by @\(dest.byTag)").font(.caption).foregroundColor(.secondary)
+                        Button { onFollowDest(dest); dismiss() } label: {
+                            Label("Navigate the trip direction", systemImage: "arrow.triangle.turn.up.right.diamond.fill")
+                        }.tint(Brand.teal)
                     }
                 }
                 Section {

@@ -3,6 +3,7 @@
 import SwiftUI
 
 struct LoginView: View {
+    @Environment(\.colorScheme) private var scheme
     @State private var email = ""
     @State private var password = ""
     @State private var emailErr: String?
@@ -52,7 +53,7 @@ struct LoginView: View {
             }
             .padding(.horizontal, 28)
         }
-        .background(Brand.background(false).ignoresSafeArea())
+        .background(Brand.background(scheme == .dark).ignoresSafeArea())
         .sheet(isPresented: $showRegister) { RegisterView() }
         .alert("Verify your email", isPresented: $verifyPrompt) {
             Button("Resend") { AuthService.resendVerification() }

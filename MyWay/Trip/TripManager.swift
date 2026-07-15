@@ -14,7 +14,9 @@ final class TripManager: NSObject, ObservableObject, CLLocationManagerDelegate {
     @Published var members: [TripMember] = []
     @Published var pins: [TripPin] = []
     @Published var dest: TripDest?
-    @Published var sharingLive = false          // a LiveShare is active
+    @Published var plan: TripPlan?              // the shared trip plan (nil = none)
+    @Published var sharingLive = false          // my own LiveShare is active
+    @Published var visibleShares: [TripMember] = []   // people currently sharing their location with me
 
     private var uid = ""
     private var myTag = ""
@@ -27,7 +29,9 @@ final class TripManager: NSObject, ObservableObject, CLLocationManagerDelegate {
     private var membersReg: ListenerRegistration?
     private var pinsReg: ListenerRegistration?
     private var destReg: ListenerRegistration?
+    private var planReg: ListenerRegistration?
     private var liveReg: ListenerRegistration?
+    private var visibleReg: ListenerRegistration?
 
     private override init() {
         super.init()
@@ -42,18 +46,51 @@ final class TripManager: NSObject, ObservableObject, CLLocationManagerDelegate {
         guard uid != self.uid else { self.myTag = tag; self.myPhoto = photo; return }
         unbind()
         self.uid = uid; self.myTag = tag; self.myPhoto = photo
+        // Make sure the marker uses the real profile picture even if the local cache was empty.
+        if myPhoto.isEmpty { Profiles.fetchProfile(uid) { [weak self] p in
+            Task { @MainActor in if let ph = p?.photo, !ph.isEmpty { self?.myPhoto = ph; AppState.shared.setUserPhoto(uid, ph) } }
+        } }
         myTripReg = Trip.listenMyTrip(uid) { [weak self] gid in
             Task { @MainActor in self?.onTripChanged(gid) }
         }
         liveReg = LiveShare.listen(uid) { [weak self] state in
-            Task { @MainActor in self?.sharingLive = state?.active ?? false }
+            Task { @MainActor in
+                guard let self else { return }
+                if let s = state, !s.active { LiveShare.stop(self.uid); self.sharingLive = false }
+                else { self.sharingLive = state?.active ?? false }
+                self.refreshPublishing()
+            }
+        }
+        visibleReg = LiveShare.listenVisible(uid) { [weak self] states in
+            Task { @MainActor in
+                self?.visibleShares = states.compactMap { s in
+                    guard s.uid != uid, let lat = s.lat, let lng = s.lng else { return nil }
+                    return TripMember(uid: s.uid, tag: s.tag, photo: s.photo, lat: lat, lng: lng)
+                }
+            }
         }
     }
 
     func unbind() {
-        myTripReg?.remove(); liveReg?.remove()
+        myTripReg?.remove(); liveReg?.remove(); visibleReg?.remove()
         detachTripListeners(); stopPublishing()
-        uid = ""; currentGid = nil; members = []; pins = []; dest = nil; sharingLive = false
+        uid = ""; currentGid = nil; members = []; pins = []; dest = nil; sharingLive = false; visibleShares = []
+    }
+
+    // ── Live location sharing to individuals (LiveShare) — 1-hour expiry ─────────────
+    func startLiveShare(toUid: String, toTag: String) {
+        let c = AppState.shared.lastLocation
+        LiveShare.start(uid: uid, tag: myTag, photo: myPhoto, uids: [toUid], visibleTo: [toUid],
+                        lat: c?.latitude ?? 0, lng: c?.longitude ?? 0) { _ in }
+    }
+
+    func stopLiveShare() { LiveShare.stop(uid) { _ in } }
+
+    /// Push a changed profile photo to my live markers so they update mid-session (trip + live share).
+    func updateMyPhoto(_ photo: String) {
+        myPhoto = photo
+        if currentGid != nil { Trip.updatePhoto(uid, photo: photo) }
+        if sharingLive { LiveShare.updatePhoto(uid, photo: photo) }
     }
 
     // ── Actions the UI calls ──────────────────────────────────────────────────────
@@ -83,35 +120,38 @@ final class TripManager: NSObject, ObservableObject, CLLocationManagerDelegate {
     private func onTripChanged(_ gid: String?) {
         currentGid = gid
         detachTripListeners()
-        guard let gid else { stopPublishing(); members = []; pins = []; dest = nil; return }
+        guard let gid else { members = []; pins = []; dest = nil; refreshPublishing(); return }
 
         Groups.fetchNamePhoto(gid) { [weak self] name, _ in Task { @MainActor in self?.groupName = name } }
         membersReg = Trip.listenMembers(gid) { [weak self] m in Task { @MainActor in self?.members = m } }
         pinsReg = Trip.listenPins(gid) { [weak self] p in Task { @MainActor in self?.pins = p } }
         destReg = Trip.listenTripDest(gid) { [weak self] d in Task { @MainActor in self?.dest = d } }
-        startPublishing()
+        planReg = Trip.listenPlan(gid) { [weak self] p in Task { @MainActor in self?.plan = p } }
+        refreshPublishing()
     }
 
     private func detachTripListeners() {
-        membersReg?.remove(); pinsReg?.remove(); destReg?.remove()
-        membersReg = nil; pinsReg = nil; destReg = nil
+        membersReg?.remove(); pinsReg?.remove(); destReg?.remove(); planReg?.remove()
+        membersReg = nil; pinsReg = nil; destReg = nil; planReg = nil
+        plan = nil
     }
 
-    // ── Background location publishing ───────────────────────────────────────────────
-    private func startPublishing() {
+    // ── Background location publishing (runs while in a trip OR while a live share is active) ─────────
+    private func refreshPublishing() {
+        let shouldPublish = currentGid != nil || sharingLive
+        guard shouldPublish else { stopPublishing(); return }
         manager.requestAlwaysAuthorization()
         if manager.authorizationStatus != .denied {
             manager.allowsBackgroundLocationUpdates = true
             manager.showsBackgroundLocationIndicator = true
             manager.startUpdatingLocation()
         }
-        heartbeat?.invalidate()
+        guard heartbeat == nil else { return }
         // Re-write updatedAt/expireAt even when stationary so we don't look stale (20s, matches Android).
         heartbeat = Timer.scheduledTimer(withTimeInterval: 20, repeats: true) { [weak self] _ in
             Task { @MainActor in
-                guard let self, let gid = self.currentGid, !self.uid.isEmpty, let c = AppState.shared.lastLocation else { return }
-                _ = gid
-                Trip.updateLocation(self.uid, lat: c.latitude, lng: c.longitude)
+                guard let self, !self.uid.isEmpty, let c = AppState.shared.lastLocation else { return }
+                if self.currentGid != nil { Trip.updateLocation(self.uid, lat: c.latitude, lng: c.longitude) }
                 if self.sharingLive { LiveShare.updateLocation(self.uid, lat: c.latitude, lng: c.longitude) }
             }
         }
@@ -120,7 +160,7 @@ final class TripManager: NSObject, ObservableObject, CLLocationManagerDelegate {
     private func stopPublishing() {
         heartbeat?.invalidate(); heartbeat = nil
         manager.allowsBackgroundLocationUpdates = false
-        if !sharingLive { manager.stopUpdatingLocation() }
+        manager.stopUpdatingLocation()
     }
 
     nonisolated func locationManager(_ manager: CLLocationManager, didUpdateLocations locations: [CLLocation]) {

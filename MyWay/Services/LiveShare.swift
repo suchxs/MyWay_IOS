@@ -35,6 +35,8 @@ enum LiveShare {
         ref(uid).updateData(["lat": lat, "lng": lng, "updatedAt": FieldValue.serverTimestamp()])
     }
 
+    static func updatePhoto(_ uid: String, photo: String) { ref(uid).updateData(["photo": photo]) }
+
     static func stop(_ uid: String, onDone: @escaping (String?) -> Void = { _ in }) {
         ref(uid).delete { onDone($0?.localizedDescription) }
     }

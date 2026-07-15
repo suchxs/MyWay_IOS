@@ -228,6 +228,7 @@ struct LandmarkSheet: View {
         state.saveName(key, title)
         Places.setPlaceField(myUid, key: key, field: "placeId", value: placeID)
         state.saveNote(key, note)
+        dismiss()   // back to the map — the pin + note now show there (clear feedback the save worked)
     }
 
     @ViewBuilder private var detailsCard: some View {

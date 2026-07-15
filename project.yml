@@ -31,6 +31,13 @@ targets:
       path: MyWay/Info.plist
       properties:
         CFBundleDisplayName: MyWay
+        UISupportedInterfaceOrientations:
+          - UIInterfaceOrientationPortrait
+        UISupportedInterfaceOrientations~ipad:
+          - UIInterfaceOrientationPortrait
+          - UIInterfaceOrientationPortraitUpsideDown
+          - UIInterfaceOrientationLandscapeLeft
+          - UIInterfaceOrientationLandscapeRight
         # Reads GMS_API_KEY from Secrets.xcconfig (gitignored) at build time. See SETUP.md step 3.
         GMSApiKey: $(GMS_API_KEY)
         # Routes API is a REST web service — needs a key WITHOUT iOS-app restriction (see SETUP.md).
@@ -40,6 +47,8 @@ targets:
         NSLocationAlwaysAndWhenInUseUsageDescription: MyWay shares your live location with your group during a trip, even in the background.
         NSCameraUsageDescription: Take a photo for your profile or to send in a chat.
         NSPhotoLibraryUsageDescription: Pick a photo for your profile, group avatar, or a chat message.
+        NSMicrophoneUsageDescription: Use your microphone for voice place search.
+        NSSpeechRecognitionUsageDescription: Transcribe your voice to search for places.
         UIBackgroundModes:
           - location
           - remote-notification
