@@ -14,6 +14,7 @@ struct GroupChatView: View {
     @State private var draft = ""
     @State private var photoItem: PhotosPickerItem?
     @State private var showInfo = false
+    @State private var showSchedule = false
     @State private var liveViewer: LiveTarget?
     @State private var pinViewer: PinTarget?
     @State private var cardTarget: ProfileCardTarget?
@@ -111,11 +112,33 @@ struct GroupChatView: View {
                         .buttonStyle(.borderedProminent).tint(Brand.teal).controlSize(.small)
                 }
             }.padding(.horizontal, 14).padding(.vertical, 8).background(Brand.teal.opacity(0.10))
+        } else if let s = g.scheduledTrip {
+            scheduledBanner(s)
         } else {
-            Button { trip.joinTrip(gid: group.id, groupName: group.name, tripActive: false) } label: {
+            Button { showSchedule = true } label: {
                 Label("Start Trip", systemImage: "location.north.circle.fill").bold().frame(maxWidth: .infinity)
             }.buttonStyle(.borderedProminent).tint(Brand.teal).padding(.horizontal, 14).padding(.vertical, 8)
+                .sheet(isPresented: $showSchedule) { ScheduleTripSheet(group: group, myUid: myUid, myTag: myTag) }
         }
+    }
+
+    @ViewBuilder private func scheduledBanner(_ s: ScheduledTrip) -> some View {
+        HStack(spacing: 10) {
+            Image(systemName: "calendar.badge.clock").foregroundColor(Brand.tealDeep)
+            VStack(alignment: .leading, spacing: 1) {
+                Text("“\(s.name)” scheduled").font(.subheadline).bold()
+                Text(ScheduleTripSheet.when(s.startAt) + (s.items.isEmpty ? "" : " · \(s.items.count) stops"))
+                    .font(.caption).foregroundColor(.secondary)
+            }
+            Spacer()
+            Button("Start") {
+                Trip.startScheduledNow(group.id, name: s.name, stops: s.items, actorUid: myUid, actorTag: myTag)
+                trip.joinTrip(gid: group.id, groupName: group.name, tripActive: true)
+            }.buttonStyle(.borderedProminent).tint(Brand.teal).controlSize(.small)
+            if g.isAdmin(myUid) || s.by == myUid {
+                Button("Cancel") { Trip.cancelSchedule(group.id) }.buttonStyle(.bordered).controlSize(.small)
+            }
+        }.padding(.horizontal, 14).padding(.vertical, 8).background(Brand.teal.opacity(0.10))
     }
 }
 

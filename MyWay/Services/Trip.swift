@@ -95,6 +95,34 @@ enum Trip {
         db.collection("groups").document(gid).updateData(["tripActive": true]) { onDone($0?.localizedDescription) }
     }
 
+    // ── Scheduling (book a trip for a future time; members get local reminders) ──────
+    static func scheduleTrip(_ gid: String, sched: ScheduledTrip, onDone: @escaping (String?) -> Void = { _ in }) {
+        db.collection("groups").document(gid).updateData(["scheduledTrip": sched.dict]) { onDone($0?.localizedDescription) }
+    }
+
+    static func cancelSchedule(_ gid: String, onDone: @escaping (String?) -> Void = { _ in }) {
+        db.collection("groups").document(gid).updateData(["scheduledTrip": FieldValue.delete()]) { onDone($0?.localizedDescription) }
+    }
+
+    /// Promote a scheduled trip to a live one: clear the schedule, go active, and seed the plan from its
+    /// stops (first stop becomes the shared destination). The caller still joins separately.
+    static func startScheduledNow(_ gid: String, name: String, stops: [ScheduledStop], actorUid: String, actorTag: String) {
+        let gRef = db.collection("groups").document(gid)
+        var g: [String: Any] = ["tripActive": true, "scheduledTrip": FieldValue.delete()]
+        if let first = stops.first {
+            g["tripDest"] = ["id": first.id, "lat": first.lat, "lng": first.lng, "name": first.name,
+                             "by": actorUid, "byTag": actorTag, "done": [String](), "planItemId": first.id]
+        }
+        let batch = db.batch()
+        batch.updateData(g, forDocument: gRef)
+        if !stops.isEmpty {
+            batch.setData(["name": name.isEmpty ? "Trip plan" : name, "paused": false, "archived": false,
+                           "items": stops.map { ["id": $0.id, "name": $0.name, "lat": $0.lat, "lng": $0.lng, "finished": false] }],
+                          forDocument: planRef(gid))
+        }
+        batch.commit()
+    }
+
     /// End the session (any member): clears participants + pins + offers + plan, marks not-in-trip.
     static func endSession(_ gid: String, onDone: @escaping (String?) -> Void) {
         let groupRef = db.collection("groups").document(gid)
