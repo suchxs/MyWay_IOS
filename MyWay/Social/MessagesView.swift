@@ -234,7 +234,8 @@ struct LiveViewerSheet: View {
     @State private var camera: GMSCameraPosition?
     @State private var reg: ListenerRegistration?
     @ObservedObject private var profiles = ProfileStore.shared
-    @StateObject private var myLoc = LocationManager()   // my own live position while the sheet is open
+    @ObservedObject private var trip = TripManager.shared    // am I currently sharing?
+    @StateObject private var myLoc = LocationManager()       // my own live position while the sheet is open
 
     private var myUid: String { AuthService.currentUid ?? "" }
 
@@ -245,12 +246,14 @@ struct LiveViewerSheet: View {
                           photo: profiles.photo(myUid).ifEmptyThen(AppState.shared.userPhoto(myUid)),
                           lat: c.latitude, lng: c.longitude)
     }
-    private var allMarkers: [TripMember] { shares + (meMarker.map { [$0] } ?? []) }
+    // Include myself when I'm sharing OR when I tapped my own card (so I always see myself on it).
+    private var includeMe: Bool { trip.sharingLive || uid == myUid }
+    private var allMarkers: [TripMember] { shares + ((includeMe ? meMarker : nil).map { [$0] } ?? []) }
 
     var body: some View {
         NavigationStack {
             Group {
-                if !shares.isEmpty {
+                if !allMarkers.isEmpty {
                     VStack(spacing: 0) {
                         // myUid stays "" here so my own marker renders too (the map hides only its own myUid).
                         GoogleMapView(places: [], pinHue: 0, pinIcon: "", pencilGlyph: "",
@@ -258,7 +261,7 @@ struct LiveViewerSheet: View {
                                       liveShares: allMarkers, camera: $camera,
                                       onTapMarker: { _ in }, onLongPress: { _ in })
                             .ignoresSafeArea(edges: .bottom)
-                        Text("🔴 Live · \(shares.count) sharing").bold().padding()
+                        Text("🔴 Live · \(allMarkers.count) sharing").bold().padding()
                     }
                 } else if !loaded {
                     ProgressView()
@@ -278,14 +281,20 @@ struct LiveViewerSheet: View {
                                           photo: profiles.photo(s.uid).ifEmptyThen(s.photo), lat: lat, lng: lng)
                     }
                     loaded = true
-                    // Centre on the tapped person the first time we get a fix (else the first sharer).
-                    if camera == nil, let focus = shares.first(where: { $0.uid == uid }) ?? shares.first,
-                       let lat = focus.lat, let lng = focus.lng {
-                        camera = GMSCameraPosition(latitude: lat, longitude: lng, zoom: 15)
-                    }
+                    focusCamera()
                 }
             }
+            .onChange(of: myLoc.location) { _ in focusCamera() }   // my card → centre once GPS lands
             .onDisappear { reg?.remove(); myLoc.stop() }
+        }
+    }
+
+    // Centre on the tapped person; if that's me (my own card), centre on my position.
+    private func focusCamera() {
+        guard camera == nil else { return }
+        let focus = (uid == myUid ? meMarker : shares.first(where: { $0.uid == uid })) ?? shares.first ?? meMarker
+        if let f = focus, let lat = f.lat, let lng = f.lng {
+            camera = GMSCameraPosition(latitude: lat, longitude: lng, zoom: 15)
         }
     }
 }
