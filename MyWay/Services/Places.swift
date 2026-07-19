@@ -54,14 +54,16 @@ enum Places {
 
     static func deleteCollection(_ uid: String, id: String) { colls(uid).document(id).delete() }
 
-    static func deleteAll(_ uid: String) {
-        for ref in [places(uid), colls(uid)] {
-            ref.getDocuments { snap, _ in
-                guard let snap, !snap.isEmpty else { return }
-                let batch = db.batch()
-                snap.documents.forEach { batch.deleteDocument($0.reference) }
-                batch.commit()
-            }
+    private static func wipe(_ ref: CollectionReference) {
+        ref.getDocuments { snap, _ in
+            guard let snap, !snap.isEmpty else { return }
+            let batch = db.batch()
+            snap.documents.forEach { batch.deleteDocument($0.reference) }
+            batch.commit()
         }
     }
+
+    static func deletePlaces(_ uid: String) { wipe(places(uid)) }
+    static func deleteCollections(_ uid: String) { wipe(colls(uid)) }
+    static func deleteAll(_ uid: String) { deletePlaces(uid); deleteCollections(uid) }
 }

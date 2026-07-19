@@ -50,6 +50,11 @@ enum Profiles {
         db.collection("user_banners").document(uid).setData(["banner": base64]) { onDone($0?.localizedDescription) }
     }
 
+    /// Block a user — add them to my `blocked` array (Profiles.blockUser on Android).
+    static func blockUser(_ uid: String, targetUid: String) {
+        db.collection("users").document(uid).setData(["blocked": FieldValue.arrayUnion([targetUid])], merge: true)
+    }
+
     static func fetchBanner(_ uid: String, onResult: @escaping (String) -> Void) {
         db.collection("user_banners").document(uid).getDocument { snap, _ in
             onResult(snap?.get("banner") as? String ?? "")

@@ -41,7 +41,7 @@ enum AuthService {
         FcmTokens.unregister(uid)
         Profiles.deleteMyData(uid, tagLower: tagLower) { err in
             if let err { completion(err); return }
-            Task { @MainActor in AppState.shared.clearMyPlaces() }
+            Task { @MainActor in AppState.shared.clearMyPlaces(); AppState.shared.clearAllCollections() }
             guard let user = Auth.auth().currentUser else { signOut(); completion(nil); return }
             user.delete { e in
                 if let e = e as NSError?, e.code == AuthErrorCode.requiresRecentLogin.rawValue {

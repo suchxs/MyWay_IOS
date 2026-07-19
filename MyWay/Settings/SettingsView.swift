@@ -46,7 +46,7 @@ struct SettingsView: View {
         }
         .navigationTitle("Settings")
         .alert("Delete my saved places?", isPresented: $confirmClear) {
-            Button("Delete", role: .destructive) { state.clearMyPlaces() }
+            Button("Delete", role: .destructive) { state.clearMyPlaces(); state.clearAllCollections() }
             Button("Cancel", role: .cancel) {}
         } message: {
             Text("This permanently removes all saved pins, notes and collections from your account, on every device. This can't be undone.")

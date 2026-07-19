@@ -67,9 +67,16 @@ struct TravelGroup: Identifiable, Equatable {
     var lastTs: Int64 = 0
     var tripScheduledAt: Date? = nil     // set = a future trip is booked but not yet live (server auto-starts it)
     var tripGoing: [String] = []         // uids who marked themselves attending the scheduled trip
+    var pinned: [String: Bool] = [:]     // per-user inbox flags (Messenger-style long-press actions)
+    var archived: [String: Bool] = [:]
+    var muted: [String: Bool] = [:]
 
     func isAdmin(_ uid: String) -> Bool { uid == owner || admins.contains(uid) }
     func tagOf(_ uid: String) -> String { tags[uid] ?? "unknown" }
+    func isUnread(_ uid: String) -> Bool { lastTs > (reads[uid] ?? 0) }
+    func isPinned(_ uid: String) -> Bool { pinned[uid] == true }
+    func isArchived(_ uid: String) -> Bool { archived[uid] == true }
+    func isMuted(_ uid: String) -> Bool { muted[uid] == true }
 }
 
 struct GroupMessage: Identifiable, Equatable {

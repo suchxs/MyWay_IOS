@@ -10,8 +10,15 @@ struct PrivateChat: Identifiable, Equatable {
     var lastMsg = ""
     var lastTs: Int64 = 0
     var reads: [String: Int64] = [:]
+    var pinned: [String: Bool] = [:]     // per-user inbox flags (Messenger-style long-press actions)
+    var archived: [String: Bool] = [:]
+    var muted: [String: Bool] = [:]
     func otherUid(_ myUid: String) -> String { users.first { $0 != myUid } ?? "" }
     func otherTag(_ myUid: String) -> String { tags[otherUid(myUid)] ?? "User" }
+    func isUnread(_ uid: String) -> Bool { lastTs > (reads[uid] ?? 0) }
+    func isPinned(_ uid: String) -> Bool { pinned[uid] == true }
+    func isArchived(_ uid: String) -> Bool { archived[uid] == true }
+    func isMuted(_ uid: String) -> Bool { muted[uid] == true }
 }
 
 enum PrivateMessages {
@@ -27,7 +34,10 @@ enum PrivateMessages {
                     guard let users = d.get("users") as? [String] else { return nil }
                     return PrivateChat(id: d.documentID, users: users, tags: d.get("tags") as? [String: String] ?? [:],
                                        lastMsg: d.get("lastMsg") as? String ?? "", lastTs: d.get("lastTs") as? Int64 ?? 0,
-                                       reads: d.get("reads") as? [String: Int64] ?? [:])
+                                       reads: d.get("reads") as? [String: Int64] ?? [:],
+                                       pinned: d.get("pinned") as? [String: Bool] ?? [:],
+                                       archived: d.get("archived") as? [String: Bool] ?? [:],
+                                       muted: d.get("muted") as? [String: Bool] ?? [:])
                 }
                 onChange(chats.sorted { $0.lastTs > $1.lastTs })
             }
@@ -38,12 +48,25 @@ enum PrivateMessages {
             guard let d, d.exists, let users = d.get("users") as? [String] else { onChange(nil); return }
             onChange(PrivateChat(id: chatId, users: users, tags: d.get("tags") as? [String: String] ?? [:],
                                  lastMsg: d.get("lastMsg") as? String ?? "", lastTs: d.get("lastTs") as? Int64 ?? 0,
-                                 reads: d.get("reads") as? [String: Int64] ?? [:]))
+                                 reads: d.get("reads") as? [String: Int64] ?? [:],
+                                 pinned: d.get("pinned") as? [String: Bool] ?? [:],
+                                 archived: d.get("archived") as? [String: Bool] ?? [:],
+                                 muted: d.get("muted") as? [String: Bool] ?? [:]))
         }
     }
 
     static func markRead(_ chatId: String, uid: String, ts: Int64) {
         db.collection("private_chats").document(chatId).updateData(["reads.\(uid)": ts])
+    }
+
+    /// Per-user inbox flag (pinned/archived/muted), keyed by uid.
+    static func updateMetadata(_ chatId: String, uid: String, field: String, value: Bool) {
+        db.collection("private_chats").document(chatId).updateData(["\(field).\(uid)": value])
+    }
+
+    /// Leave a DM from my inbox — drop myself from users[] (the other side keeps their copy).
+    static func deleteChat(_ chatId: String, uid: String) {
+        db.collection("private_chats").document(chatId).updateData(["users": FieldValue.arrayRemove([uid])])
     }
 
     static func listenMessages(_ chatId: String, onChange: @escaping ([GroupMessage]) -> Void) -> ListenerRegistration {

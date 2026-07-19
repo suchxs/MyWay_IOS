@@ -16,6 +16,11 @@ struct Conversation: Identifiable {
     let preview: String
     let ts: Int64
     let tripActive: Bool
+    let unread: Bool
+    let pinned: Bool
+    let archived: Bool
+    let muted: Bool
+    var isGroup: Bool { if case .group = kind { return true }; return false }
 }
 
 struct MessagesView: View {
@@ -28,7 +33,10 @@ struct MessagesView: View {
     @State private var showNewGroup = false
     @State private var chatReg: ListenerRegistration?
     @State private var groupReg: ListenerRegistration?
+    @State private var tab = 0   // 0 = All, 1 = Groups
+    @State private var showArchived = false
     @ObservedObject private var profiles = ProfileStore.shared
+    @ObservedObject private var app = AppState.shared
 
     private var conversations: [Conversation] {
         let dms = chats.map { c -> Conversation in
@@ -36,22 +44,46 @@ struct MessagesView: View {
             let tag = profiles.tag(other).isEmpty ? c.otherTag(myUid) : profiles.tag(other)
             return Conversation(id: "p:\(c.id)", kind: .dm(chat: c, otherUid: other, tag: tag),
                                 title: "@\(tag)", photo: profiles.photo(other),
-                                preview: c.lastMsg, ts: c.lastTs, tripActive: false)
+                                preview: c.lastMsg, ts: c.lastTs, tripActive: false, unread: c.isUnread(myUid),
+                                pinned: c.isPinned(myUid), archived: c.isArchived(myUid), muted: c.isMuted(myUid))
         }
         let grps = groups.map { g in
             Conversation(id: "g:\(g.id)", kind: .group(g), title: g.name, photo: g.photo,
                          preview: g.lastMsg.isEmpty ? "\(g.members.count) members" : g.lastMsg,
-                         ts: g.lastTs, tripActive: g.tripActive)
+                         ts: g.lastTs, tripActive: g.tripActive, unread: g.isUnread(myUid),
+                         pinned: g.isPinned(myUid), archived: g.isArchived(myUid), muted: g.isMuted(myUid))
         }
-        return (dms + grps).sorted { $0.ts > $1.ts }
+        return (dms + grps)
+            .filter { $0.archived == showArchived && (tab == 0 || $0.isGroup) }
+            // Pinned float to the top, then newest first (matches Android's inbox ordering).
+            .sorted { ($0.pinned ? 1 : 0, $0.ts) > ($1.pinned ? 1 : 0, $1.ts) }
     }
 
     var body: some View {
-        List(conversations) { conv in
-            NavigationLink { destination(conv) } label: { row(conv) }
+        VStack(spacing: 0) {
+            if !showArchived { tabBar }
+            if conversations.isEmpty {
+                Spacer()
+                Text(showArchived ? "No archived conversations." : "No conversations yet.")
+                    .foregroundColor(.secondary).multilineTextAlignment(.center).padding(32)
+                Spacer()
+            } else {
+                List(conversations) { conv in
+                    NavigationLink { destination(conv) } label: { row(conv) }
+                        .contextMenu { contextActions(conv) }
+                }
+                .listStyle(.plain)
+            }
         }
-        .navigationTitle("Messages")
-        .toolbar { ToolbarItem(placement: .primaryAction) { Button { showNewMenu = true } label: { Image(systemName: "square.and.pencil") } } }
+        .navigationTitle(showArchived ? "Archived" : "Messages")
+        .toolbar {
+            ToolbarItem(placement: .primaryAction) {
+                Button { showArchived.toggle() } label: {
+                    Image(systemName: showArchived ? "tray.full" : "archivebox")
+                }
+            }
+            ToolbarItem(placement: .primaryAction) { Button { showNewMenu = true } label: { Image(systemName: "square.and.pencil") } }
+        }
         .confirmationDialog("Start a conversation", isPresented: $showNewMenu, titleVisibility: .visible) {
             Button("Message a friend") { showNewDM = true }
             Button("Create a group") { showNewGroup = true }
@@ -69,6 +101,72 @@ struct MessagesView: View {
         .onDisappear { chatReg?.remove(); groupReg?.remove() }
     }
 
+    // Messenger-style All / Groups tabs, each with a red unread badge.
+    private var tabBar: some View {
+        VStack(spacing: 0) {
+            HStack(spacing: 0) {
+                tabButton("All", index: 0, badge: app.unreadAllCount)
+                tabButton("Groups", index: 1, badge: app.unreadGroupsCount)
+            }
+            Divider()
+        }
+        .background(.bar)
+    }
+
+    private func tabButton(_ title: String, index: Int, badge: Int) -> some View {
+        let selected = tab == index
+        return Button { tab = index } label: {
+            VStack(spacing: 8) {
+                HStack(spacing: 5) {
+                    Text(title).fontWeight(.semibold)
+                    if badge > 0 {
+                        Text(badge > 99 ? "99+" : "\(badge)")
+                            .font(.system(size: 10, weight: .bold)).foregroundColor(.white)
+                            .padding(.horizontal, 5).padding(.vertical, 1)
+                            .background(Color(hex: 0xEF4444)).clipShape(Capsule())
+                    }
+                }
+                .foregroundColor(selected ? Brand.teal : .secondary)
+                .padding(.top, 10)
+                Rectangle().fill(selected ? Brand.teal : .clear).frame(height: 2.5)
+            }
+            .frame(maxWidth: .infinity)
+        }
+        .buttonStyle(.plain)
+    }
+
+    // Long-press actions on a conversation row (pin / archive / mute / delete), Messenger-style.
+    @ViewBuilder private func contextActions(_ conv: Conversation) -> some View {
+        let gid = conv.isGroup ? String(conv.id.dropFirst(2)) : nil
+        let cid = !conv.isGroup ? String(conv.id.dropFirst(2)) : nil
+        Button { setFlag(conv, "pinned", !conv.pinned) } label: {
+            Label(conv.pinned ? "Unpin" : "Pin", systemImage: conv.pinned ? "pin.slash" : "pin")
+        }
+        Button { setFlag(conv, "archived", !conv.archived) } label: {
+            Label(conv.archived ? "Unarchive" : "Archive", systemImage: conv.archived ? "tray.and.arrow.up" : "archivebox")
+        }
+        Button { setFlag(conv, "muted", !conv.muted) } label: {
+            Label(conv.muted ? "Unmute" : "Mute", systemImage: conv.muted ? "bell" : "bell.slash")
+        }
+        if case .dm(_, let otherUid, _) = conv.kind {
+            Button(role: .destructive) { Profiles.blockUser(myUid, targetUid: otherUid) } label: {
+                Label("Block user", systemImage: "hand.raised")
+            }
+        }
+        Button(role: .destructive) {
+            if let gid { Groups.leaveGroup(gid, uid: myUid) { _ in } }
+            else if let cid { PrivateMessages.deleteChat(cid, uid: myUid) }
+        } label: {
+            Label(conv.isGroup ? "Leave group" : "Delete chat", systemImage: "trash")
+        }
+    }
+
+    private func setFlag(_ conv: Conversation, _ field: String, _ value: Bool) {
+        let id = String(conv.id.dropFirst(2))   // strip "g:" / "p:" prefix
+        if conv.isGroup { Groups.updateMetadata(id, uid: myUid, field: field, value: value) }
+        else { PrivateMessages.updateMetadata(id, uid: myUid, field: field, value: value) }
+    }
+
     @ViewBuilder private func destination(_ conv: Conversation) -> some View {
         switch conv.kind {
         case .group(let g): GroupChatView(group: g, myUid: myUid, myTag: myTag)
@@ -82,15 +180,19 @@ struct MessagesView: View {
             VStack(alignment: .leading, spacing: 2) {
                 HStack(spacing: 6) {
                     if case .group = conv.kind { Image(systemName: "person.3.fill").font(.caption2).foregroundColor(.secondary) }
-                    Text(conv.title).bold().lineLimit(1)
+                    Text(conv.title).fontWeight(conv.unread ? .heavy : .bold).lineLimit(1)
+                    if conv.pinned { Image(systemName: "pin.fill").font(.caption2).foregroundColor(Brand.tealDeep) }
+                    if conv.muted { Image(systemName: "bell.slash.fill").font(.caption2).foregroundColor(.secondary) }
                     if conv.tripActive {
                         Text("LIVE").font(.caption2).bold().foregroundColor(.white)
                             .padding(.horizontal, 6).padding(.vertical, 2).background(Color.red).clipShape(Capsule())
                     }
                 }
                 Text(conv.preview.isEmpty ? "No messages yet" : conv.preview)
-                    .font(.caption).foregroundColor(.secondary).lineLimit(1)
+                    .font(.caption).fontWeight(conv.unread ? .semibold : .regular)
+                    .foregroundColor(conv.unread ? .primary : .secondary).lineLimit(1)
             }
+            if conv.unread { Spacer(); Circle().fill(Brand.teal).frame(width: 9, height: 9) }
         }
     }
 }

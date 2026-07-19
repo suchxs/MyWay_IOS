@@ -6,6 +6,7 @@ struct CollectionsView: View {
     @State private var showCreate = false
     @State private var newName = ""
     @State private var newIcon = "📁"
+    @State private var confirmDeleteAll = false
 
     var body: some View {
         List {
@@ -29,7 +30,22 @@ struct CollectionsView: View {
             }
         }
         .navigationTitle("Collections")
-        .toolbar { ToolbarItem(placement: .primaryAction) { Button { showCreate = true } label: { Image(systemName: "plus") } } }
+        .toolbar {
+            if !state.collections.isEmpty {
+                ToolbarItem(placement: .primaryAction) {
+                    Button(role: .destructive) { confirmDeleteAll = true } label: {
+                        Image(systemName: "trash").foregroundColor(Color(hex: 0xEF4444))
+                    }
+                }
+            }
+            ToolbarItem(placement: .primaryAction) { Button { showCreate = true } label: { Image(systemName: "plus") } }
+        }
+        .alert("Delete all collections?", isPresented: $confirmDeleteAll) {
+            Button("Delete All", role: .destructive) { state.clearAllCollections() }
+            Button("Cancel", role: .cancel) {}
+        } message: {
+            Text("This permanently removes every collection, on all your devices. Your saved waypoints are kept. This can't be undone.")
+        }
         .alert("New collection", isPresented: $showCreate) {
             TextField("Emoji", text: $newIcon)
             TextField("Name", text: $newName)

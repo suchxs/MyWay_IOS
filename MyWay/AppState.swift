@@ -17,6 +17,10 @@ final class AppState: ObservableObject {
     // Last known location so screens can seed without their own GPS fix (App.lastLat/lastLng).
     @Published var lastLocation: CLLocationCoordinate2D?
 
+    // Unread counts for the sidebar badge + inbox tabs (App.unreadAllCount/unreadGroupsCount).
+    @Published var unreadAllCount = 0      // DMs + groups
+    @Published var unreadGroupsCount = 0   // groups only
+
     // ── Device settings (UserDefaults) ──────────────────────────────────────────
     @Published var darkMode: Bool = UserDefaults.standard.bool(forKey: "dark_mode") {
         didSet { UserDefaults.standard.set(darkMode, forKey: "dark_mode") }
@@ -42,6 +46,10 @@ final class AppState: ObservableObject {
     private var uid = ""
     private var placesReg: ListenerRegistration?
     private var collsReg: ListenerRegistration?
+    private var chatsReg: ListenerRegistration?
+    private var groupsReg: ListenerRegistration?
+    private var rawChats: [PrivateChat] = []
+    private var rawGroups: [TravelGroup] = []
 
     // ── Firestore binding (App.bindUser/unbindUser) — idempotent ─────────────────
     func bindUser(_ uid: String) {
@@ -54,12 +62,27 @@ final class AppState: ObservableObject {
         collsReg = Places.listenCollections(uid) { [weak self] colls in
             Task { @MainActor in self?.collections = colls }
         }
+        // Always-on unread listeners so the sidebar badge + inbox tabs stay live app-wide.
+        chatsReg = PrivateMessages.listenMyChats(uid) { [weak self] list in
+            Task { @MainActor in self?.rawChats = list; self?.updateUnreadCounts() }
+        }
+        groupsReg = Groups.listenMyGroups(uid) { [weak self] list in
+            Task { @MainActor in self?.rawGroups = list; self?.updateUnreadCounts() }
+        }
+    }
+
+    private func updateUnreadCounts() {
+        let dms = rawChats.filter { $0.isUnread(uid) && !$0.isArchived(uid) }.count
+        let grps = rawGroups.filter { $0.isUnread(uid) && !$0.isArchived(uid) }.count
+        unreadGroupsCount = grps
+        unreadAllCount = dms + grps
     }
 
     func unbindUser() {
-        placesReg?.remove(); collsReg?.remove()
-        placesReg = nil; collsReg = nil; uid = ""
+        placesReg?.remove(); collsReg?.remove(); chatsReg?.remove(); groupsReg?.remove()
+        placesReg = nil; collsReg = nil; chatsReg = nil; groupsReg = nil; uid = ""
         places = []; collections = []
+        rawChats = []; rawGroups = []; unreadAllCount = 0; unreadGroupsCount = 0
     }
 
     // ── Places ───────────────────────────────────────────────────────────────────
@@ -107,9 +130,16 @@ final class AppState: ObservableObject {
         }
     }
 
+    /// Wipe only saved waypoints (App.clearMyPlaces) — collections are left intact.
     func clearMyPlaces() {
-        if !uid.isEmpty { Places.deleteAll(uid) }
-        places = []; collections = []
+        if !uid.isEmpty { Places.deletePlaces(uid) }
+        places = []
+    }
+
+    /// Wipe only collections (App.clearAllCollections) — saved waypoints are left intact.
+    func clearAllCollections() {
+        if !uid.isEmpty { Places.deleteCollections(uid) }
+        collections = []
     }
 
     func signOut() {

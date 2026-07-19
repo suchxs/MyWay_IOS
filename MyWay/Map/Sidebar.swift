@@ -54,7 +54,7 @@ struct Sidebar: View {
                     item("mappin.and.ellipse", "Waypoints") { onNavigate(.waypoints) }
                     item("folder", "Collections") { onNavigate(.collections) }
                     section("SOCIAL")
-                    item("bubble.left.and.bubble.right", "Messages") { onNavigate(.messages) }
+                    item("bubble.left.and.bubble.right", "Messages", badge: state.unreadAllCount) { onNavigate(.messages) }
                     item("person.2", "Friends") { onNavigate(.friends) }
                     section("SETTINGS")
                     item("gearshape", "Settings") { onNavigate(.settings) }
@@ -84,16 +84,25 @@ struct Sidebar: View {
             .padding(.leading, 8).padding(.top, 8).padding(.bottom, 4)
     }
 
-    private func iconBadge(_ sys: String, _ color: Color) -> some View {
-        ZStack { Circle().fill(color.opacity(0.12)); Image(systemName: sys).foregroundColor(color) }
-            .frame(width: 38, height: 38)
+    private func iconBadge(_ sys: String, _ color: Color, badge: Int = 0) -> some View {
+        ZStack(alignment: .topTrailing) {
+            ZStack { Circle().fill(color.opacity(0.12)); Image(systemName: sys).foregroundColor(color) }
+                .frame(width: 38, height: 38)
+            if badge > 0 {
+                Text(badge > 99 ? "99+" : "\(badge)")
+                    .font(.system(size: 10, weight: .bold)).foregroundColor(.white)
+                    .padding(.horizontal, 5).padding(.vertical, 1)
+                    .background(Color(hex: 0xEF4444)).clipShape(Capsule())
+                    .offset(x: 6, y: -4)
+            }
+        }
     }
 
-    private func item(_ sys: String, _ label: String, danger: Bool = false, action: @escaping () -> Void) -> some View {
+    private func item(_ sys: String, _ label: String, danger: Bool = false, badge: Int = 0, action: @escaping () -> Void) -> some View {
         let accent: Color = danger ? Color(hex: 0xEF4444) : Brand.teal
         return Button(action: action) {
             HStack {
-                iconBadge(sys, accent)
+                iconBadge(sys, accent, badge: badge)
                 Text(label).fontWeight(.medium).foregroundColor(danger ? accent : .primary)
                 Spacer()
             }.padding(.vertical, 8).padding(.horizontal, 6)

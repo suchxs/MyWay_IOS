@@ -55,11 +55,19 @@ enum Groups {
                      lastMsg: d.get("lastMsg") as? String ?? "",
                      lastTs: d.get("lastTs") as? Int64 ?? 0,
                      tripScheduledAt: (d.get("tripScheduledAt") as? Timestamp)?.dateValue(),
-                     tripGoing: d.get("tripGoing") as? [String] ?? [])
+                     tripGoing: d.get("tripGoing") as? [String] ?? [],
+                     pinned: d.get("pinned") as? [String: Bool] ?? [:],
+                     archived: d.get("archived") as? [String: Bool] ?? [:],
+                     muted: d.get("muted") as? [String: Bool] ?? [:])
     }
 
     static func updatePhoto(_ gid: String, base64: String, onDone: @escaping (String?) -> Void) {
         db.collection("groups").document(gid).updateData(["photo": base64]) { onDone($0?.localizedDescription) }
+    }
+
+    /// Per-user inbox flag (pinned/archived/muted), keyed by uid so each member has their own.
+    static func updateMetadata(_ gid: String, uid: String, field: String, value: Bool) {
+        db.collection("groups").document(gid).updateData(["\(field).\(uid)": value])
     }
 
     // ── Chat ─────────────────────────────────────────────────────────────────────

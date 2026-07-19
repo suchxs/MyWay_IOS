@@ -7,6 +7,7 @@ struct WaypointsView: View {
     @EnvironmentObject var state: AppState
     var onFocus: (CLLocationCoordinate2D) -> Void
     @State private var editKey: String?
+    @State private var confirmDeleteAll = false
 
     var body: some View {
         Group {
@@ -26,6 +27,21 @@ struct WaypointsView: View {
             }
         }
         .navigationTitle("Saved Waypoints")
+        .toolbar {
+            if !state.places.isEmpty {
+                ToolbarItem(placement: .primaryAction) {
+                    Button(role: .destructive) { confirmDeleteAll = true } label: {
+                        Image(systemName: "trash").foregroundColor(Color(hex: 0xEF4444))
+                    }
+                }
+            }
+        }
+        .alert("Delete all waypoints?", isPresented: $confirmDeleteAll) {
+            Button("Delete All", role: .destructive) { state.clearMyPlaces() }
+            Button("Cancel", role: .cancel) {}
+        } message: {
+            Text("This permanently removes every saved waypoint and note, on all your devices. Collections are kept. This can't be undone.")
+        }
         .sheet(item: Binding(get: { editKey.map { IdString($0) } }, set: { editKey = $0?.value })) { id in
             if let place = state.places.first(where: { $0.key == id.value }) { EditWaypointSheet(place: place) }
         }
