@@ -15,6 +15,9 @@ struct GroupChatView: View {
     @State private var photoItem: PhotosPickerItem?
     @State private var showInfo = false
     @State private var showSchedule = false
+    @State private var showQueue = false
+    @State private var groupPlan: TripPlan?       // this group's shared plan (listened even when not live)
+    @State private var planReg: ListenerRegistration?
     @State private var liveViewer: LiveTarget?
     @State private var pinViewer: PinTarget?
     @State private var cardTarget: ProfileCardTarget?
@@ -61,6 +64,14 @@ struct GroupChatView: View {
         .sheet(isPresented: $showInfo) {
             GroupInfoSheet(initialGroup: g, myUid: myUid, myTag: myTag, messages: messages, photos: profiles.photos)
         }
+        .sheet(isPresented: $showSchedule) {
+            ScheduleTripSheet(group: group, myUid: myUid, myTag: myTag,
+                              onStartNow: { trip.joinTrip(gid: group.id, groupName: group.name, tripActive: false) },
+                              onScheduled: { showQueue = true })
+        }
+        .sheet(isPresented: $showQueue) {
+            PlanView(gid: group.id, actorUid: myUid, actorTag: myTag, tripPins: trip.pins)
+        }
         .onAppear {
             InAppNotifier.shared.activeChatKey = group.id
             reg = Groups.listenMessages(group.id) { msgs in
@@ -71,8 +82,9 @@ struct GroupChatView: View {
                 liveGroup = grp
                 if let grp { ProfileStore.shared.observe(grp.members) }   // live avatars + @tags
             }
+            planReg = Trip.listenPlan(group.id) { groupPlan = $0 }
         }
-        .onDisappear { reg?.remove(); groupReg?.remove(); InAppNotifier.shared.activeChatKey = nil }
+        .onDisappear { reg?.remove(); groupReg?.remove(); planReg?.remove(); InAppNotifier.shared.activeChatKey = nil }
         .onChange(of: photoItem) { item in
             guard let item else { return }
             Task {
@@ -112,33 +124,57 @@ struct GroupChatView: View {
                         .buttonStyle(.borderedProminent).tint(Brand.teal).controlSize(.small)
                 }
             }.padding(.horizontal, 14).padding(.vertical, 8).background(Brand.teal.opacity(0.10))
-        } else if let s = g.scheduledTrip {
-            scheduledBanner(s)
+        } else if let at = g.tripScheduledAt {
+            scheduledBanner(at)
         } else {
             Button { showSchedule = true } label: {
                 Label("Start Trip", systemImage: "location.north.circle.fill").bold().frame(maxWidth: .infinity)
             }.buttonStyle(.borderedProminent).tint(Brand.teal).padding(.horizontal, 14).padding(.vertical, 8)
-                .sheet(isPresented: $showSchedule) { ScheduleTripSheet(group: group, myUid: myUid, myTag: myTag) }
         }
     }
 
-    @ViewBuilder private func scheduledBanner(_ s: ScheduledTrip) -> some View {
-        HStack(spacing: 10) {
-            Image(systemName: "calendar.badge.clock").foregroundColor(Brand.tealDeep)
-            VStack(alignment: .leading, spacing: 1) {
-                Text("“\(s.name)” scheduled").font(.subheadline).bold()
-                Text(ScheduleTripSheet.when(s.startAt) + (s.items.isEmpty ? "" : " · \(s.items.count) stops"))
-                    .font(.caption).foregroundColor(.secondary)
+    @ViewBuilder private func scheduledBanner(_ at: Date) -> some View {
+        let going = g.tripGoing.contains(myUid)
+        VStack(alignment: .leading, spacing: 8) {
+            HStack(spacing: 8) {
+                Image(systemName: "calendar.badge.clock").foregroundColor(Brand.tealDeep)
+                Text("Trip scheduled for \(tripStamp(at))").font(.subheadline).bold()
+                Spacer()
             }
-            Spacer()
-            Button("Start") {
-                Trip.startScheduledNow(group.id, name: s.name, stops: s.items, actorUid: myUid, actorTag: myTag)
-                trip.joinTrip(gid: group.id, groupName: group.name, tripActive: true)
-            }.buttonStyle(.borderedProminent).tint(Brand.teal).controlSize(.small)
-            if g.isAdmin(myUid) || s.by == myUid {
-                Button("Cancel") { Trip.cancelSchedule(group.id) }.buttonStyle(.bordered).controlSize(.small)
+            // Attendance — who's coming, plus my own toggle.
+            HStack(spacing: 8) {
+                if !g.tripGoing.isEmpty {
+                    AvatarStack(uids: g.tripGoing, profiles: profiles)
+                    Text("\(g.tripGoing.count) going").font(.caption).foregroundColor(.secondary)
+                }
+                Spacer()
+                Button(going ? "Going ✓" : "I'm going") { Trip.setGoing(group.id, uid: myUid, going: !going) }
+                    .buttonStyle(.bordered).tint(going ? Brand.teal : .secondary).controlSize(.small)
             }
-        }.padding(.horizontal, 14).padding(.vertical, 8).background(Brand.teal.opacity(0.10))
+            HStack(spacing: 8) {
+                Button { showQueue = true } label: {
+                    Label("Activities" + (groupPlan.map { $0.items.isEmpty ? "" : " (\($0.items.count))" } ?? ""),
+                          systemImage: "list.bullet")
+                }.buttonStyle(.bordered).tint(Brand.teal).controlSize(.small)
+                Spacer()
+                Button("Cancel", role: .destructive) { Trip.endSession(group.id) { _ in } }
+                    .buttonStyle(.bordered).controlSize(.small)
+            }
+        }.padding(.horizontal, 14).padding(.vertical, 10).background(Brand.teal.opacity(0.10))
+    }
+}
+
+/// A row of overlapping member avatars (used for the attendance list).
+struct AvatarStack: View {
+    let uids: [String]
+    @ObservedObject var profiles: ProfileStore
+    var body: some View {
+        HStack(spacing: -8) {
+            ForEach(uids.prefix(5), id: \.self) { uid in
+                AvatarCircle(photoBase64: profiles.photo(uid), tag: profiles.tag(uid), size: 24)
+                    .overlay(Circle().stroke(Color(.systemBackground), lineWidth: 1.5))
+            }
+        }
     }
 }
 
@@ -154,6 +190,7 @@ struct GroupInfoSheet: View {
     @State private var liveGroup: TravelGroup?
     @State private var groupReg: ListenerRegistration?
     @State private var photoItem: PhotosPickerItem?
+    @State private var showPhotoPicker = false
     @State private var showAdd = false
     @State private var confirmDelete = false
 
@@ -170,9 +207,8 @@ struct GroupInfoSheet: View {
                     VStack(spacing: 8) {
                         AvatarCircle(photoBase64: group.photo, tag: group.name, size: 96)
                         if iAmAdmin {
-                            PhotosPicker(selection: $photoItem, matching: .images) {
-                                Text(group.photo.isEmpty ? "Add group photo" : "Change photo").foregroundColor(Brand.tealDeep)
-                            }
+                            Button(group.photo.isEmpty ? "Add group photo" : "Change photo") { showPhotoPicker = true }
+                                .foregroundColor(Brand.tealDeep)
                         }
                         Text(group.name).font(.title3).bold()
                     }.frame(maxWidth: .infinity)
@@ -214,10 +250,13 @@ struct GroupInfoSheet: View {
                 Button("Delete", role: .destructive) { Groups.deleteGroup(group.id); dismiss() }
                 Button("Cancel", role: .cancel) {}
             }
+            .photosPicker(isPresented: $showPhotoPicker, selection: $photoItem, matching: .images)
             .onChange(of: photoItem) { item in
+                guard let item else { return }
                 Task {
-                    guard let data = try? await item?.loadTransferable(type: Data.self), let img = UIImage(data: data) else { return }
+                    guard let data = try? await item.loadTransferable(type: Data.self), let img = UIImage(data: data) else { photoItem = nil; return }
                     Groups.updatePhoto(group.id, base64: Img.encode(img, maxDimension: 512, quality: 0.7)) { _ in }
+                    photoItem = nil   // reset so picking again re-fires
                 }
             }
             .onAppear {

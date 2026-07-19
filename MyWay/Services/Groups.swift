@@ -54,7 +54,8 @@ enum Groups {
                      reads: d.get("reads") as? [String: Int64] ?? [:],
                      lastMsg: d.get("lastMsg") as? String ?? "",
                      lastTs: d.get("lastTs") as? Int64 ?? 0,
-                     scheduledTrip: ScheduledTrip.from(d.get("scheduledTrip")))
+                     tripScheduledAt: (d.get("tripScheduledAt") as? Timestamp)?.dateValue(),
+                     tripGoing: d.get("tripGoing") as? [String] ?? [])
     }
 
     static func updatePhoto(_ gid: String, base64: String, onDone: @escaping (String?) -> Void) {

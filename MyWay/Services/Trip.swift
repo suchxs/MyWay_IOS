@@ -95,32 +95,20 @@ enum Trip {
         db.collection("groups").document(gid).updateData(["tripActive": true]) { onDone($0?.localizedDescription) }
     }
 
-    // ── Scheduling (book a trip for a future time; members get local reminders) ──────
-    static func scheduleTrip(_ gid: String, sched: ScheduledTrip, onDone: @escaping (String?) -> Void = { _ in }) {
-        db.collection("groups").document(gid).updateData(["scheduledTrip": sched.dict]) { onDone($0?.localizedDescription) }
+    /// Schedule the trip for a future time instead of starting now. Stores the time on the group doc;
+    /// the server (tripScheduleTick) sends the day/15-min reminders and flips it live at that time. Resets
+    /// the reminder flags so a re-schedule notifies again. Cancel via `endSession`.
+    static func scheduleSession(_ gid: String, startAt: Date, onDone: @escaping (String?) -> Void = { _ in }) {
+        db.collection("groups").document(gid).updateData([
+            "tripScheduledAt": Timestamp(date: startAt), "tripActive": false,
+            "tripDayNotified": false, "tripSoonNotified": false,
+        ]) { onDone($0?.localizedDescription) }
     }
 
-    static func cancelSchedule(_ gid: String, onDone: @escaping (String?) -> Void = { _ in }) {
-        db.collection("groups").document(gid).updateData(["scheduledTrip": FieldValue.delete()]) { onDone($0?.localizedDescription) }
-    }
-
-    /// Promote a scheduled trip to a live one: clear the schedule, go active, and seed the plan from its
-    /// stops (first stop becomes the shared destination). The caller still joins separately.
-    static func startScheduledNow(_ gid: String, name: String, stops: [ScheduledStop], actorUid: String, actorTag: String) {
-        let gRef = db.collection("groups").document(gid)
-        var g: [String: Any] = ["tripActive": true, "scheduledTrip": FieldValue.delete()]
-        if let first = stops.first {
-            g["tripDest"] = ["id": first.id, "lat": first.lat, "lng": first.lng, "name": first.name,
-                             "by": actorUid, "byTag": actorTag, "done": [String](), "planItemId": first.id]
-        }
-        let batch = db.batch()
-        batch.updateData(g, forDocument: gRef)
-        if !stops.isEmpty {
-            batch.setData(["name": name.isEmpty ? "Trip plan" : name, "paused": false, "archived": false,
-                           "items": stops.map { ["id": $0.id, "name": $0.name, "lat": $0.lat, "lng": $0.lng, "finished": false] }],
-                          forDocument: planRef(gid))
-        }
-        batch.commit()
+    /// Mark myself attending (or not) a scheduled trip — an array on the group doc, shown in the info sheet.
+    static func setGoing(_ gid: String, uid: String, going: Bool) {
+        let op = going ? FieldValue.arrayUnion([uid]) : FieldValue.arrayRemove([uid])
+        db.collection("groups").document(gid).updateData(["tripGoing": op])
     }
 
     /// End the session (any member): clears participants + pins + offers + plan, marks not-in-trip.
@@ -137,7 +125,10 @@ enum Trip {
                     offerSnap?.documents.forEach { batch.deleteDocument($0.reference) }
                     partSnap?.documents.forEach { batch.deleteDocument($0.reference) }
                     batch.deleteDocument(planRef(gid))
-                    batch.updateData(["tripActive": false, "tripDest": FieldValue.delete()], forDocument: groupRef)
+                    batch.updateData(["tripActive": false, "tripDest": FieldValue.delete(),
+                                      "tripScheduledAt": FieldValue.delete(), "tripGoing": FieldValue.delete(),
+                                      "tripDayNotified": FieldValue.delete(), "tripSoonNotified": FieldValue.delete()],
+                                     forDocument: groupRef)
                     batch.commit { onDone($0?.localizedDescription) }
                 }
             }

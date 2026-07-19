@@ -1,51 +1,47 @@
-// Booking sheet shown when you tap "Start Trip". Defaults to now (→ start immediately); pick a future
-// time to schedule instead. Name the trip and queue the planned stops; the queue becomes the trip plan.
+// Schedule (or immediately start) a trip — mirrors Android's ScheduleTripDialog. Time defaults to now;
+// picking a future date/time schedules it (a past time is rejected). Scheduling creates the shared plan
+// with the given name, then hands off to the activity queue (PlanView) to fill it in.
 import SwiftUI
-import CoreLocation
+
+/// Android's stamp(): same-day → "3:30 PM", otherwise "Aug 4, 3:30 PM".
+func tripStamp(_ date: Date) -> String {
+    let sameDay = Calendar.current.isDate(date, inSameDayAs: Date())
+    return date.formatted(sameDay ? .dateTime.hour().minute()
+                                  : .dateTime.month().day().hour().minute())
+}
 
 struct ScheduleTripSheet: View {
     @Environment(\.dismiss) private var dismiss
     let group: TravelGroup
     let myUid: String
     let myTag: String
+    var onStartNow: () -> Void          // start immediately (start session + join)
+    var onScheduled: () -> Void         // scheduled → open the activity queue
 
     @State private var name = ""
     @State private var startAt = Date()
-    @State private var stops: [ScheduledStop] = []
-    @State private var showSearch = false
-    @State private var error: String?
 
     // A minute of slack so "now" isn't a moving target while the sheet is open.
     private var isFuture: Bool { startAt > Date().addingTimeInterval(60) }
+    private var inPast: Bool { startAt < Date().addingTimeInterval(-60) }
 
     var body: some View {
         NavigationStack {
             Form {
-                Section("Trip") {
+                Section {
                     TextField("Trip name", text: $name)
                     DatePicker("Starts", selection: $startAt, in: Date()..., displayedComponents: [.date, .hourAndMinute])
+                    Text(isFuture ? "Scheduled for \(tripStamp(startAt)) — the group is notified a day and 15 min before."
+                                  : "Starts now. Pick a later time to schedule instead.")
+                        .font(.caption).foregroundColor(.secondary)
                 }
-                Section("Planned stops") {
-                    ForEach(stops, id: \.id) { s in Text(s.name.isEmpty ? "Stop" : s.name) }
-                        .onDelete { stops.remove(atOffsets: $0) }
-                    Button { showSearch = true } label: { Label("Add a place", systemImage: "plus.circle") }.tint(Brand.teal)
-                    if stops.isEmpty { Text("Optional — add the places you plan to visit.").font(.caption).foregroundColor(.secondary) }
-                }
-                if let error { Section { Text(error).foregroundColor(Color(hex: 0xEF4444)) } }
             }
             .navigationTitle("Start a trip")
             .navigationBarTitleDisplayMode(.inline)
             .toolbar {
                 ToolbarItem(placement: .cancellationAction) { Button("Cancel") { dismiss() } }
                 ToolbarItem(placement: .confirmationAction) {
-                    Button(isFuture ? "Schedule" : "Start now") { submit() }.bold()
-                        .disabled(isFuture && name.trimmed.isEmpty)
-                }
-            }
-            .sheet(isPresented: $showSearch) {
-                PlaceSearchView { _, placeName, coord in
-                    stops.append(ScheduledStop(id: String(UUID().uuidString.prefix(10)), name: placeName,
-                                               lat: coord.latitude, lng: coord.longitude))
+                    Button(isFuture ? "Schedule" : "Start now") { submit() }.bold().disabled(inPast)
                 }
             }
         }
@@ -53,19 +49,13 @@ struct ScheduleTripSheet: View {
 
     private func submit() {
         if isFuture {
-            guard startAt > Date() else { error = "Pick a time in the future."; return }
-            let sched = ScheduledTrip(name: name.trimmed.isEmpty ? group.name : name.trimmed,
-                                      startAt: startAt, by: myUid, byTag: myTag, items: stops)
-            Trip.scheduleTrip(group.id, sched: sched)
-            Groups.postSystem(group.id, text: "@\(myTag) scheduled “\(sched.name)” for \(Self.when(startAt))")
+            let planName = name.trimmed.isEmpty ? "Trip plan" : name.trimmed
+            Trip.scheduleSession(group.id, startAt: startAt) { err in
+                if err == nil { Trip.createPlan(group.id, name: planName, actorUid: myUid, actorTag: myTag) { _ in } }
+            }
+            dismiss(); onScheduled()
         } else {
-            Trip.startScheduledNow(group.id, name: name.trimmed, stops: stops, actorUid: myUid, actorTag: myTag)
-            TripManager.shared.joinTrip(gid: group.id, groupName: group.name, tripActive: true)
+            dismiss(); onStartNow()
         }
-        dismiss()
-    }
-
-    static func when(_ d: Date) -> String {
-        d.formatted(.dateTime.weekday(.abbreviated).month().day().hour().minute())
     }
 }

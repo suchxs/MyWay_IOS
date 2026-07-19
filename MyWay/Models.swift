@@ -65,7 +65,8 @@ struct TravelGroup: Identifiable, Equatable {
     var reads: [String: Int64] = [:]
     var lastMsg: String = ""
     var lastTs: Int64 = 0
-    var scheduledTrip: ScheduledTrip? = nil   // set = a future trip is booked but not yet live
+    var tripScheduledAt: Date? = nil     // set = a future trip is booked but not yet live (server auto-starts it)
+    var tripGoing: [String] = []         // uids who marked themselves attending the scheduled trip
 
     func isAdmin(_ uid: String) -> Bool { uid == owner || admins.contains(uid) }
     func tagOf(_ uid: String) -> String { tags[uid] ?? "unknown" }
@@ -103,35 +104,6 @@ func parseSharedPins(_ raw: Any?) -> [SharedPin] {
     return arr.map { SharedPin(lat: ($0["lat"] as? NSNumber)?.doubleValue ?? 0,
                                lng: ($0["lng"] as? NSNumber)?.doubleValue ?? 0,
                                name: $0["name"] as? String ?? "", note: $0["note"] as? String ?? "") }
-}
-
-// A trip booked for a future time, stored on groups/{gid}.scheduledTrip. `items` become the trip plan
-// when it starts. Parsed by Groups.mapGroup; created/cancelled/promoted by Trip.
-struct ScheduledTrip: Equatable {
-    let name: String
-    let startAt: Date
-    let by, byTag: String
-    let items: [ScheduledStop]
-
-    var dict: [String: Any] {
-        ["name": name, "startAt": startAt.timeIntervalSince1970 * 1000, "by": by, "byTag": byTag,
-         "items": items.map(\.dict)]
-    }
-    static func from(_ raw: Any?) -> ScheduledTrip? {
-        guard let m = raw as? [String: Any], let ms = (m["startAt"] as? NSNumber)?.doubleValue else { return nil }
-        return ScheduledTrip(name: m["name"] as? String ?? "Trip",
-                             startAt: Date(timeIntervalSince1970: ms / 1000),
-                             by: m["by"] as? String ?? "", byTag: m["byTag"] as? String ?? "",
-                             items: (m["items"] as? [[String: Any]] ?? []).map(ScheduledStop.from))
-    }
-}
-struct ScheduledStop: Equatable {
-    let id, name: String; let lat, lng: Double
-    var dict: [String: Any] { ["id": id, "name": name, "lat": lat, "lng": lng] }
-    static func from(_ m: [String: Any]) -> ScheduledStop {
-        ScheduledStop(id: "\(m["id"] ?? UUID().uuidString.prefix(10))", name: m["name"] as? String ?? "",
-                      lat: (m["lat"] as? NSNumber)?.doubleValue ?? 0, lng: (m["lng"] as? NSNumber)?.doubleValue ?? 0)
-    }
 }
 
 // Firestore doc id for a place — must match Android's App.locationKey exactly.
