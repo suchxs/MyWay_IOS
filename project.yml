@@ -20,6 +20,9 @@ packages:
   GooglePlaces:
     url: https://github.com/googlemaps/ios-places-sdk
     from: 9.0.0
+  LiveKit:
+    url: https://github.com/livekit/client-sdk-swift
+    from: 2.0.0
 
 targets:
   MyWay:
@@ -75,6 +78,10 @@ targets:
         product: FirebaseFirestore
       - package: Firebase
         product: FirebaseMessaging
+      - package: Firebase
+        product: FirebaseFunctions
+      - package: LiveKit
+        product: LiveKit
       - package: GoogleSignIn
         product: GoogleSignIn
       - package: GoogleMaps

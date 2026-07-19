@@ -25,14 +25,18 @@ struct GroupChatView: View {
     @State private var collOffer: CollectionOffer?
     @State private var reg: ListenerRegistration?
     @State private var groupReg: ListenerRegistration?
+    @State private var callParticipants: [String] = []   // who's in the group call now (empty = none)
+    @State private var callReg: ListenerRegistration?
     @ObservedObject private var trip = TripManager.shared
     @ObservedObject private var profiles = ProfileStore.shared
+    @ObservedObject private var callMgr = CallManager.shared
 
     private var g: TravelGroup { liveGroup ?? group }
     private var liveTags: [String: String] { g.tags.merging(profiles.tags) { _, live in live } }
 
     var body: some View {
         VStack(spacing: 0) {
+            callBanner
             tripBar
             ChatMessageList(messages: messages, myUid: myUid, photos: profiles.photos,
                             reads: g.reads, tags: liveTags,
@@ -60,7 +64,26 @@ struct GroupChatView: View {
         }
         .navigationTitle(g.name)
         .navigationBarTitleDisplayMode(.inline)
-        .toolbar { ToolbarItem(placement: .primaryAction) { Button { showInfo = true } label: { Image(systemName: "info.circle") } } }
+        .toolbar {
+            ToolbarItem(placement: .primaryAction) {
+                Button { CallManager.shared.startGroupCall(gid: group.id, name: g.name, photo: g.photo, video: false) } label: {
+                    // Green + badge when a call is already in progress, so members know to join.
+                    ZStack(alignment: .topTrailing) {
+                        Image(systemName: "phone.fill").foregroundColor(callParticipants.isEmpty ? Brand.teal : .green)
+                        if !callParticipants.isEmpty {
+                            Text("\(callParticipants.count)").font(.system(size: 9, weight: .bold)).foregroundColor(.white)
+                                .padding(3).background(Circle().fill(.green)).offset(x: 8, y: -8)
+                        }
+                    }
+                }
+            }
+            ToolbarItem(placement: .primaryAction) {
+                Button { CallManager.shared.startGroupCall(gid: group.id, name: g.name, photo: g.photo, video: true) } label: {
+                    Image(systemName: "video.fill").foregroundColor(callParticipants.isEmpty ? Brand.teal : .green)
+                }
+            }
+            ToolbarItem(placement: .primaryAction) { Button { showInfo = true } label: { Image(systemName: "info.circle") } }
+        }
         .sheet(isPresented: $showInfo) {
             GroupInfoSheet(initialGroup: g, myUid: myUid, myTag: myTag, messages: messages, photos: profiles.photos)
         }
@@ -83,8 +106,9 @@ struct GroupChatView: View {
                 if let grp { ProfileStore.shared.observe(grp.members) }   // live avatars + @tags
             }
             planReg = Trip.listenPlan(group.id) { groupPlan = $0 }
+            callReg = Calls.listenGroupCall(group.id) { callParticipants = $0 }
         }
-        .onDisappear { reg?.remove(); groupReg?.remove(); planReg?.remove(); InAppNotifier.shared.activeChatKey = nil }
+        .onDisappear { reg?.remove(); groupReg?.remove(); planReg?.remove(); callReg?.remove(); InAppNotifier.shared.activeChatKey = nil }
         .onChange(of: photoItem) { item in
             guard let item else { return }
             Task {
@@ -107,6 +131,27 @@ struct GroupChatView: View {
         }
         .padding(10)
         .background(.ultraThinMaterial)
+    }
+
+    // Shown when a group call is live and I'm not already in it — one tap to join.
+    @ViewBuilder private var callBanner: some View {
+        if !callParticipants.isEmpty && callMgr.phase == .idle {
+            HStack(spacing: 10) {
+                Image(systemName: "video.fill").foregroundColor(.white)
+                VStack(alignment: .leading, spacing: 1) {
+                    Text("Group call in progress").font(.subheadline).bold().foregroundColor(.white)
+                    Text("\(callParticipants.count) in call").font(.caption).foregroundColor(.white.opacity(0.85))
+                }
+                Spacer()
+                Button { CallManager.shared.startGroupCall(gid: group.id, name: g.name, photo: g.photo, video: true) } label: {
+                    Text("Join").bold().foregroundColor(.green)
+                        .padding(.horizontal, 16).padding(.vertical, 7)
+                        .background(Capsule().fill(.white))
+                }
+            }
+            .padding(.horizontal, 14).padding(.vertical, 10)
+            .background(Color.green)
+        }
     }
 
     @ViewBuilder private var tripBar: some View {

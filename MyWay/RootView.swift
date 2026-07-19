@@ -14,11 +14,12 @@ final class Router: ObservableObject {
         handle = Auth.auth().addStateDidChangeListener { [weak self] _, user in
             guard let self else { return }
             guard let user, user.isEmailVerified else {
-                state.unbindUser(); InAppNotifier.shared.stop(); self.route = .login; return
+                state.unbindUser(); InAppNotifier.shared.stop(); CallManager.shared.stop(); self.route = .login; return
             }
             state.bindUser(user.uid)
             FcmTokens.register(user.uid)
             TripManager.shared.bind(uid: user.uid, tag: state.userTag(user.uid), photo: state.userPhoto(user.uid))
+            CallManager.shared.bind(uid: user.uid, tag: state.userTag(user.uid), photo: state.userPhoto(user.uid))
             InAppNotifier.shared.start(user.uid)
             ProfileStore.shared.observe(user.uid)
             ProfileStore.shared.observeBanner(user.uid)   // so the drawer header shows my banner
@@ -48,6 +49,7 @@ struct RootView: View {
             }
         }
         .overlay(alignment: .top) { if router.route == .main { NoticeBanner() } }
+        .overlay { if router.route == .main { CallOverlay() } }
         .onAppear { router.start(state) }
     }
 }

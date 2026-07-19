@@ -137,6 +137,12 @@ enum PrivateMessages {
              preview: "🔴 Live location", msg: ["from": fromUid, "fromTag": fromTag, "text": "", "liveFrom": fromUid])
     }
 
+    /// Centered system notice in a DM (e.g. a missed-call line). Written by [fromUid] (rules require it).
+    static func postSystem(_ chatId: String, fromUid: String, fromTag: String, otherUid: String, otherTag: String, text: String) {
+        post(chatId, fromUid: fromUid, fromTag: fromTag, otherUid: otherUid, otherTag: otherTag,
+             preview: text, msg: ["from": fromUid, "fromTag": fromTag, "text": text, "system": true])
+    }
+
     private static func post(_ chatId: String, fromUid: String, fromTag: String, otherUid: String, otherTag: String,
                              preview: String, msg: [String: Any]) {
         let ts = Int64(Date().timeIntervalSince1970 * 1000)

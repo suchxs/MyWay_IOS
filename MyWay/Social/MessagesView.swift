@@ -254,6 +254,11 @@ struct PrivateChatView: View {
         PrivateMessages.unsendMessage(chatId, mid: m.id, isLast: messages.last?.id == m.id)
     }
 
+    private func startCall(video: Bool) {
+        CallManager.shared.startOutgoing(to: otherUid, tag: liveTags[otherUid] ?? otherTag,
+                                         photo: profiles.photo(otherUid), video: video)
+    }
+
     var body: some View {
         VStack(spacing: 0) {
             ChatMessageList(messages: messages, myUid: myUid, photos: profiles.photos,
@@ -293,6 +298,12 @@ struct PrivateChatView: View {
                     Image(systemName: trip.sharingLive ? "location.slash.fill" : "location.fill")
                         .foregroundColor(trip.sharingLive ? Color(hex: 0xEF4444) : Brand.teal)
                 }
+            }
+            ToolbarItem(placement: .primaryAction) {
+                Button { startCall(video: false) } label: { Image(systemName: "phone.fill").foregroundColor(Brand.teal) }
+            }
+            ToolbarItem(placement: .primaryAction) {
+                Button { startCall(video: true) } label: { Image(systemName: "video.fill").foregroundColor(Brand.teal) }
             }
             ToolbarItem(placement: .primaryAction) { Button { showInfo = true } label: { Image(systemName: "info.circle") } }
         }
