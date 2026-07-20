@@ -29,14 +29,18 @@ enum Calls {
 
     /// Ringing calls addressed to me (single-field `to` query — no composite index needed).
     static func listenIncoming(_ myUid: String, onChange: @escaping (Call?) -> Void) -> ListenerRegistration {
-        db.collection("calls").whereField("to", isEqualTo: myUid).addSnapshotListener { snap, _ in
+        db.collection("calls").whereField("to", isEqualTo: myUid).addSnapshotListener { snap, err in
+            if err != nil { return }   // transient/permission error — don't spuriously clear an incoming call
             onChange(snap?.documents.compactMap(parse).first { $0.status == "ringing" })
         }
     }
 
     /// Watch one call doc for accept (→ active) or hang-up (→ deleted, parsed as nil).
     static func listen(_ id: String, onChange: @escaping (Call?) -> Void) -> ListenerRegistration {
-        ref(id).addSnapshotListener { d, _ in onChange(d.flatMap(parse)) }
+        ref(id).addSnapshotListener { d, err in
+            if err != nil { return }   // don't treat a listener error as "peer hung up" (was ending calls instantly)
+            onChange(d.flatMap(parse))
+        }
     }
 
     private static func parse(_ d: DocumentSnapshot) -> Call? {
@@ -91,7 +95,10 @@ enum Calls {
 
     /// Current participants of a group call (empty = no call in progress).
     static func listenGroupCall(_ gid: String, onChange: @escaping ([String]) -> Void) -> ListenerRegistration {
-        groupRef(gid).addSnapshotListener { d, _ in onChange(d?.get("participants") as? [String] ?? []) }
+        groupRef(gid).addSnapshotListener { d, err in
+            if err != nil { return }   // ignore transient/permission errors — keep the banner state
+            onChange(d?.get("participants") as? [String] ?? [])
+        }
     }
 
     /// Mint a LiveKit access token for [room] via the Cloud Function. Returns (token, wss-url).
